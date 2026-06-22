@@ -5,8 +5,7 @@ import { cn } from "../utils";
 import { UniLogo } from "./UniLogo";
 import { useUnread } from "../UnreadContext";
 import { useAuth } from "../contexts/AuthContext";
-import { doc, updateDoc, serverTimestamp, collection, query, where, onSnapshot } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { supabase } from "../lib/supabase";
 
 export default function Navigation() {
   const location = useLocation();
@@ -17,9 +16,9 @@ export default function Navigation() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const defaultAvatar = profile?.avatar || user?.photoURL || "https://i.pravatar.cc/150?u=" + (user?.uid || "u1");
-  const defaultName = profile?.name || user?.displayName || "Usuário";
-  const userHandle = profile?.handle || `@user${user?.uid?.substring(0, 5)}`;
+  const defaultAvatar = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
+  const defaultName = profile?.name || user?.user_metadata?.full_name || "Usuário";
+  const userHandle = profile?.handle || `@user${user?.id?.substring(0, 5)}`;
   const userEmail = profile?.email || user?.email || "usuario@uni.social";
 
   const [profileName, setProfileName] = useState(defaultName);
@@ -32,8 +31,8 @@ export default function Navigation() {
   // Sync state when profile loads
   useEffect(() => {
     if (profile || user) {
-      const avatarToUse = profile?.avatar || user?.photoURL || "https://i.pravatar.cc/150?u=" + (user?.uid || "u1");
-      const nameToUse = profile?.name || user?.displayName || "Usuário";
+      const avatarToUse = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
+      const nameToUse = profile?.name || user?.user_metadata?.full_name || "Usuário";
       
       setSavedName((prevSavedName) => {
         if (prevSavedName !== nameToUse) setProfileName(nameToUse);
@@ -45,7 +44,7 @@ export default function Navigation() {
         return avatarToUse;
       });
     }
-  }, [profile?.avatar, profile?.name, user?.photoURL, user?.displayName]);
+  }, [profile?.avatar, profile?.name, user?.user_metadata?.avatar_url, user?.user_metadata?.full_name]);
 
   const hasChanges = profileName !== savedName || profileImage !== savedImage;
 
@@ -58,13 +57,12 @@ export default function Navigation() {
   const handleSaveProfile = async () => {
     setIsSaving(true);
     try {
-      if (user?.uid) {
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, {
+      if (user?.id) {
+        await supabase.from('users').update({
           name: profileName,
           avatar: profileImage,
-          updatedAt: serverTimestamp()
-        });
+          updatedAt: new Date().toISOString()
+        }).eq('id', user.id);
       }
       setSavedName(profileName);
       setSavedImage(profileImage);

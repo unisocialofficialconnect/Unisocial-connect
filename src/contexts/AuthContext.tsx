@@ -1,8 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
-import { OperationType, handleFirestoreError } from '../lib/firebase';
+import { User, Session } from '@supabase/supabase-js';
+import { supabase, OperationType, handleSupabaseError } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -28,57 +26,94 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubscribeProfile: (() => void) | null = null;
-    
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currUser) => {
-      setUser(currUser);
-      if (currUser) {
-        try {
-          const userRef = doc(db, 'users', currUser.uid);
-          
-          unsubscribeProfile = onSnapshot(userRef, async (snap) => {
-            if (snap.exists()) {
-              setProfile(snap.data());
-            } else {
-              // Create profile
-              const newProfile = {
-                id: currUser.uid,
-                name: currUser.displayName || 'Usuário',
-                handle: `@${(currUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`,
-                avatar: currUser.photoURL || `https://i.pravatar.cc/150?u=${currUser.uid}`,
-                verified: false,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              };
-              await setDoc(userRef, newProfile);
-            }
-          }, (error) => {
-             handleFirestoreError(error, OperationType.GET, 'users');
-          });
-          
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, 'users');
+    let profileSubscription: any = null;
+
+    const fetchProfile = async (currentUser: User) => {
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', currentUser.id)
+          .single();
+
+        if (error) {
+          if (error.code === 'PGRST116') { // Not found
+            const newProfile = {
+              id: currentUser.id,
+              name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Usuário',
+              handle: `@${(currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`,
+              avatar: currentUser.user_metadata?.avatar_url || `https://i.pravatar.cc/150?u=${currentUser.id}`,
+              verified: false,
+            };
+            const { data: createdProfile, error: insertError } = await supabase
+              .from('users')
+              .insert([newProfile])
+              .select()
+              .single();
+              
+            if (insertError) throw insertError;
+            setProfile(createdProfile);
+          } else {
+            throw error;
+          }
+        } else {
+          setProfile(data);
         }
-      } else {
-        if (unsubscribeProfile) unsubscribeProfile();
-        setProfile(null);
+
+        // Subscribe to real-time changes for this user profile
+        profileSubscription = supabase
+          .channel(`public:users:id=eq.${currentUser.id}`)
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
+            setProfile(payload.new);
+          })
+          .subscribe();
+
+      } catch (error) {
+        handleSupabaseError(error, OperationType.GET, 'users');
       }
-      setLoading(false);
+    };
+
+    // Obter sessão inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfile(session.user);
+      } else {
+        setLoading(false);
+      }
     });
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchProfile(session.user).finally(() => setLoading(false));
+        } else {
+          if (profileSubscription) supabase.removeChannel(profileSubscription);
+          setProfile(null);
+          setLoading(false);
+        }
+      }
+    );
+
     return () => {
-      if (unsubscribeProfile) unsubscribeProfile();
-      unsubscribeAuth();
+      subscription.unsubscribe();
+      if (profileSubscription) supabase.removeChannel(profileSubscription);
     };
   }, []);
 
   const signInWithGoogle = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + '/app'
+      }
+    });
+    if (error) throw error;
   };
 
   const logout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
   };
 
   return (

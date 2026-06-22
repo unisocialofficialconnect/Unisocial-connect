@@ -6,8 +6,7 @@ import { cn } from "../utils";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { db } from "../lib/firebase";
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDoc, doc, updateDoc, increment, where, arrayUnion, getDocs } from "firebase/firestore";
+import { supabase } from "../lib/supabase";
 import { NotificationsDropdown } from "../components/NotificationsDropdown";
 
 export default function FeedView() {
@@ -15,7 +14,7 @@ export default function FeedView() {
   const [newPost, setNewPost] = useState("");
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const { user, profile } = useAuth();
-  const avatarUrl = profile?.avatar || user?.photoURL || "https://i.pravatar.cc/150?u=" + (user?.uid || "u1");
+  const avatarUrl = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
   const [submitting, setSubmitting] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -29,83 +28,101 @@ export default function FeedView() {
   const [likesUsers, setLikesUsers] = useState<any[]>([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
 
-  useEffect(() => {
-    const q = query(collection(db, "posts"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const postsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  const fetchPosts = async () => {
+    const { data, error } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        user:users(*)
+      `)
+      .order('timestamp', { ascending: false });
       
-      const enrichedPosts = await Promise.all(postsData.map(async (p: any) => {
-        let authorData = { name: "Usuário", handle: "@user", avatar: "https://i.pravatar.cc/150", verified: false };
-        if (p.userId) {
-          try {
-            const userDoc = await getDoc(doc(db, "users", p.userId));
-            if (userDoc.exists()) {
-              authorData = userDoc.data() as any;
-            }
-          } catch(e) {}
-        }
-        return {
-          ...p,
-          user: authorData
-        };
-      }));
-      setPosts(enrichedPosts);
-    });
+    if (!error && data) {
+      setPosts(data);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchPosts();
+
+    const channel = supabase.channel('public:posts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, payload => {
+        fetchPosts(); // recarregar para simplificar e obter os joins
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
+
+  const fetchComments = async (postId: string) => {
+    const { data, error } = await supabase
+      .from('comments')
+      .select(`
+        *,
+        user:users(*)
+      `)
+      .eq('postId', postId)
+      .order('timestamp', { ascending: true });
+      
+    if (!error && data) {
+      setPostComments(prev => ({ ...prev, [postId]: data }));
+    }
+  };
 
   useEffect(() => {
     if (!activeCommentPost) return;
     
-    const q = query(collection(db, "comments"), orderBy("timestamp", "asc"));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const allComments = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      const currentPostComments = allComments.filter((c: any) => c.postId === activeCommentPost);
+    fetchComments(activeCommentPost);
+
+    const channel = supabase.channel(`public:comments:postId=eq.${activeCommentPost}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments', filter: `postId=eq.${activeCommentPost}` }, payload => {
+        fetchComments(activeCommentPost);
+      })
+      .subscribe();
       
-      const enrichedComments = await Promise.all(currentPostComments.map(async (c: any) => {
-        let authorData = { name: "Usuário", handle: "@user", avatar: "https://i.pravatar.cc/150", verified: false };
-        if (c.userId) {
-          try {
-            const userDoc = await getDoc(doc(db, "users", c.userId));
-            if (userDoc.exists()) {
-              authorData = userDoc.data() as any;
-            }
-          } catch(e) {}
-        }
-        return { ...c, user: authorData };
-      }));
-      
-      setPostComments(prev => ({ ...prev, [activeCommentPost]: enrichedComments }));
-    });
-    
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [activeCommentPost]);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "notifications"), 
-      where("userId", "==", user.uid),
-      where("read", "==", false)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadCount(snapshot.size);
-    });
-    return () => unsubscribe();
+    
+    const fetchUnread = async () => {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('userId', user.id)
+        .eq('read', false);
+      setUnreadCount(count || 0);
+    };
+    
+    fetchUnread();
+    
+    const channel = supabase.channel(`public:notifications:userId=eq.${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `userId=eq.${user.id}` }, payload => {
+        fetchUnread();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const createNotification = async (receiverId: string | undefined, type: 'like' | 'comment', postId: string) => {
-    if (!user || !receiverId || user.uid === receiverId) return; // Don't notify self
+    if (!user || !receiverId || user.id === receiverId) return;
     try {
-      await addDoc(collection(db, "notifications"), {
+      await supabase.from('notifications').insert([{
         userId: receiverId,
-        senderId: user.uid,
+        senderId: user.id,
         type,
         postId,
         read: false,
-        timestamp: serverTimestamp()
-      });
+        timestamp: new Date().toISOString()
+      }]);
     } catch (e) {
       console.error(e);
     }
@@ -115,14 +132,14 @@ export default function FeedView() {
     if (!newPost.trim() || !user) return;
     setSubmitting(true);
     try {
-      await addDoc(collection(db, "posts"), {
-        userId: user.uid,
+      await supabase.from('posts').insert([{
+        userId: user.id,
         text: newPost,
-        image: null,
         likes: 0,
         comments: 0,
-        timestamp: serverTimestamp()
-      });
+        likedBy: [],
+        timestamp: new Date().toISOString()
+      }]);
       setNewPost("");
     } catch(e: any) {
       alert("Erro ao publicar: " + e.message);
@@ -133,12 +150,22 @@ export default function FeedView() {
 
   const handleLike = async (postId: string, postAuthorId: string) => {
     if (likedPosts.has(postId) || !user) return;
+    
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+    
+    const currentLikedBy = post.likedBy || [];
+    if (currentLikedBy.includes(user.id)) return;
+    
     setLikedPosts(prev => new Set(prev).add(postId));
+    
     try {
-      await updateDoc(doc(db, "posts", postId), {
-        likes: increment(1),
-        likedBy: arrayUnion(user.uid)
-      });
+      const newLikedBy = [...currentLikedBy, user.id];
+      await supabase.from('posts').update({
+        likes: (post.likes || 0) + 1,
+        likedBy: newLikedBy
+      }).eq('id', postId);
+      
       await createNotification(postAuthorId, 'like', postId);
     } catch(e) {}
   };
@@ -152,17 +179,14 @@ export default function FeedView() {
       return;
     }
     try {
-      const users: any[] = [];
-      const chunks = [];
-      for (let i = 0; i < post.likedBy.length; i += 30) {
-        chunks.push(post.likedBy.slice(i, i + 30));
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .in('id', post.likedBy);
+        
+      if (!error && data) {
+         setLikesUsers(data);
       }
-      for (const chunk of chunks) {
-         const usersQuery = query(collection(db, "users"), where("id", "in", chunk));
-         const usersSnap = await getDocs(usersQuery);
-         usersSnap.forEach(d => users.push(d.data()));
-      }
-      setLikesUsers(users);
     } catch(e) {
       console.error(e);
     } finally {
@@ -175,17 +199,21 @@ export default function FeedView() {
     try {
       const payload: any = {
         postId,
-        userId: user.uid,
+        userId: user.id,
         text: commentText,
-        timestamp: serverTimestamp()
+        timestamp: new Date().toISOString()
       };
       if (commentImage) payload.image = commentImage;
 
-      await addDoc(collection(db, "comments"), payload);
+      await supabase.from('comments').insert([payload]);
       
-      await updateDoc(doc(db, "posts", postId), {
-        comments: increment(1)
-      });
+      const post = posts.find(p => p.id === postId);
+      if (post) {
+         await supabase.from('posts').update({
+            comments: (post.comments || 0) + 1
+         }).eq('id', postId);
+      }
+      
       await createNotification(postAuthorId, 'comment', postId);
       
       setCommentText('');
@@ -215,7 +243,7 @@ export default function FeedView() {
   const getShareLink = () => `${window.location.origin}/#post-${sharePostId}`;
 
   const displayPosts = posts.map(post => {
-    if (post.userId === user?.uid && profile) {
+    if (post.userId === user?.id && profile) {
       return { ...post, user: { ...post.user, ...profile } };
     }
     return post;
@@ -223,12 +251,14 @@ export default function FeedView() {
 
   const getDisplayComments = (postId: string) => {
     return (postComments[postId] || []).map(comment => {
-      if (comment.userId === user?.uid && profile) {
+      if (comment.userId === user?.id && profile) {
         return { ...comment, user: { ...comment.user, ...profile } };
       }
       return comment;
     });
-  };  return (
+  };
+
+  return (
     <div className="w-full h-full overflow-hidden flex flex-col md:flex-row">
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-y-auto custom-scrollbar pb-32 pt-6 px-4 md:px-8">
@@ -333,7 +363,7 @@ export default function FeedView() {
                         {post.user?.verified && <div className="w-3.5 h-3.5 bg-uni-blue rounded-full flex items-center justify-center"><Check size={8} className="text-white" /></div>}
                       </div>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-tight">
-                        {post.user?.handle} • {post.timestamp ? formatDistanceToNow(post.timestamp?.toDate ? post.timestamp.toDate() : new Date(post.timestamp), { addSuffix: true, locale: ptBR }) : 'agora mesmo'}
+                        {post.user?.handle} • {post.timestamp ? formatDistanceToNow(new Date(post.timestamp), { addSuffix: true, locale: ptBR }) : 'agora mesmo'}
                       </span>
                     </div>
                   </div>
@@ -396,7 +426,7 @@ export default function FeedView() {
                                     <div className="bg-white/5 border border-white/5 rounded-2xl rounded-tl-none p-4 flex-1 text-sm overflow-hidden shadow-sm">
                                         <div className="flex items-center justify-between mb-2">
                                            <span className="font-bold text-white">{comment.user?.name}</span>
-                                           <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest">{comment.timestamp ? formatDistanceToNow(comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(comment.timestamp), { addSuffix: true, locale: ptBR }) : ''}</span>
+                                           <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest">{comment.timestamp ? formatDistanceToNow(new Date(comment.timestamp), { addSuffix: true, locale: ptBR }) : ''}</span>
                                         </div>
                                         {comment.text && <p className="text-slate-300 leading-relaxed">{comment.text}</p>}
                                         {comment.image && <img src={comment.image} alt="comentário" className="mt-3 max-w-full rounded-xl max-h-64 object-contain" />}
@@ -516,8 +546,6 @@ export default function FeedView() {
            <button className="w-full py-2.5 rounded-xl bg-uni-purple/20 text-uni-purple text-[10px] font-black uppercase tracking-widest hover:bg-uni-purple/30 border border-uni-purple/30 transition-all">Ver Recomendação</button>
         </section>
       </aside>
-
-      {/* Share Modal, Likes Modal, etc. are below ... identical to before but styled better ... */}
 
       {/* Share Modal */}
       {sharePostId && (

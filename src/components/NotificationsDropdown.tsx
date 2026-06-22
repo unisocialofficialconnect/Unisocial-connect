@@ -4,8 +4,7 @@ import { Bell, Heart, MessageCircle, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { db } from "../lib/firebase";
-import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc } from "firebase/firestore";
+import { supabase } from "../lib/supabase";
 
 interface NotificationsDropdownProps {
   isOpen: boolean;
@@ -18,41 +17,45 @@ export function NotificationsDropdown({ isOpen, onClose }: NotificationsDropdown
 
   useEffect(() => {
     if (!user || !isOpen) return;
-    
-    const q = query(collection(db, "notifications"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const notifsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      const userNotifs = notifsData.filter((n: any) => n.userId === user.uid);
-      
-      const enrichedNotifs = await Promise.all(userNotifs.map(async (n: any) => {
-        let senderData = { name: "Usuário", avatar: "https://i.pravatar.cc/150" };
-        if (n.senderId) {
-          try {
-            const userDoc = await getDoc(doc(db, "users", n.senderId));
-            if (userDoc.exists()) {
-              senderData = userDoc.data() as any;
-            }
-          } catch(e) {}
-        }
-        return { ...n, sender: senderData };
-      }));
-      setNotifications(enrichedNotifs);
-      
-      // Mark as read after a short delay so the user can see what's new
-      setTimeout(() => {
-        enrichedNotifs.forEach(n => {
-          if (!n.read) {
-            try {
-              updateDoc(doc(db, "notifications", n.id), { read: true });
-            } catch (e) {}
-          }
-        });
-      }, 2000);
-      
-    });
 
-    return () => unsubscribe();
+    const fetchNotifications = async () => {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select(`
+          *,
+          sender:users!senderId(*)
+        `)
+        .eq("userId", user.id)
+        .order("timestamp", { ascending: false });
+
+      if (!error && data) {
+        setNotifications(data);
+
+        // Mark as read after a short delay
+        setTimeout(() => {
+          const unreadIds = data.filter(n => !n.read).map(n => n.id);
+          if (unreadIds.length > 0) {
+            supabase
+              .from("notifications")
+              .update({ read: true })
+              .in("id", unreadIds)
+              .then();
+          }
+        }, 2000);
+      }
+    };
+
+    fetchNotifications();
+
+    const channel = supabase.channel(`public:notifications:userId=eq.${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `userId=eq.${user.id}` }, payload => {
+        fetchNotifications();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, isOpen]);
 
   return (
@@ -102,7 +105,7 @@ export function NotificationsDropdown({ isOpen, onClose }: NotificationsDropdown
                         </p>
                         <div className="flex gap-1.5 items-center text-[10px] text-slate-500 mt-1">
                           {n.type === 'like' ? <Heart size={10} className="text-uni-purple" /> : <MessageCircle size={10} className="text-uni-blue" />}
-                          <span>{n.timestamp ? formatDistanceToNow(n.timestamp?.toDate ? n.timestamp.toDate() : new Date(n.timestamp), { addSuffix: true, locale: ptBR }) : 'agora'}</span>
+                          <span>{n.timestamp ? formatDistanceToNow(new Date(n.timestamp), { addSuffix: true, locale: ptBR }) : 'agora'}</span>
                         </div>
                       </div>
                     </div>

@@ -4,8 +4,7 @@ import { ArrowRight, Sparkles, Shield, Zap, X, Mail, Lock, Eye, EyeOff } from "l
 import { motion } from "motion/react";
 import { UniLogo } from "../components/UniLogo";
 import { useAuth } from "../contexts/AuthContext";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../lib/firebase";
+import { supabase } from "../lib/supabase";
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" className="w-5 h-5 mr-3" xmlns="http://www.w3.org/2000/svg">
@@ -48,9 +47,17 @@ export default function LandingView() {
     setLoading(true);
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: { full_name: name }
+          }
+        });
+        if (error) throw error;
       }
       navigate("/app");
     } catch (e: any) {
