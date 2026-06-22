@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidUser() {
+      let data = incoming();
+      return data.keys().hasAll(['id', 'name', 'handle']) &&
+             data.id is string && data.id.size() <= 128 && data.id == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 64 &&
+             data.handle is string && data.handle.size() > 0 && data.handle.size() <= 64 &&
+             data.avatar is string && data.avatar.size() <= 3000000 &&
+             data.verified is bool && 
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+    
+    function isValidUserUpdate() {
+      let data = incoming();
+      return data.name is string && data.name.size() > 0 &&
+             data.handle is string && data.handle.size() > 0 &&
+             data.avatar is string &&
+             data.id == existing().id;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn(); // Publicly viewable profiles
+      allow create: if isOwner(userId) && isValidUser();
+      allow update: if isOwner(userId) && isValidUserUpdate();
+      allow delete: if isOwner(userId);
+    }
+
+    function isValidPost() {
+      let data = incoming();
+      return data.keys().hasAll(['userId', 'text', 'likes', 'comments', 'timestamp']) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 5000 &&
+             data.likes is number && data.likes == 0 &&
+             data.comments is number && data.comments == 0 &&
+             (!data.keys().hasAny(['likedBy']) || (data.likedBy is list && data.likedBy.size() == 0)) &&
+             data.timestamp == request.time;
+    }
+
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidPost();
+      allow update: if isSignedIn() && (
+        (isOwner(existing().userId) && incoming().diff(existing()).affectedKeys().hasOnly(['text'])) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'comments', 'likedBy']))
+      );
+      allow delete: if isOwner(existing().userId);
+    }
+
+    function isValidMessage() {
+      let data = incoming();
+      return data.keys().hasAll(['senderId', 'receiverId', 'text', 'read', 'timestamp']) &&
+             data.senderId is string && data.senderId == request.auth.uid &&
+             data.receiverId is string && data.receiverId.size() <= 128 &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
+             data.read is bool && data.read == false &&
+             data.timestamp == request.time;
+    }
+
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+      allow create: if isSignedIn() && isValidMessage();
+      allow update: if isSignedIn() && existing().receiverId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read == true;
+      allow delete: if isSignedIn() && (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid);
+    }
+
+    function isValidComment() {
+      let data = incoming();
+      return data.keys().hasAll(['postId', 'userId', 'text', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.text is string &&
+             data.timestamp == request.time;
+    }
+
+    match /comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidComment();
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    function isValidNotification() {
+      let data = incoming();
+      return data.keys().hasAll(['userId', 'senderId', 'type', 'postId', 'read', 'timestamp']) &&
+             data.senderId == request.auth.uid &&
+             data.read == false &&
+             data.timestamp == request.time;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidNotification();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

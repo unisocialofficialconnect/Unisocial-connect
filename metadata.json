@@ -1,0 +1,12 @@
+{
+  "name": "Üni Social",
+  "description": "A modern, futuristic social platform combining messaging, social networking, and AI.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,624 @@
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
+import { User, Message } from "../types";
+import { Search, Phone, Video, Info, MoreVertical, Send, MessageCircle, ArrowLeft, UserPlus, Trash2, X, Plus, Image as ImageIcon, File, Smile, Check, CheckCheck, Pin, Reply, Forward, SmilePlus } from "lucide-react";
+import { cn } from "../utils";
+import { useUnread } from "../UnreadContext";
+import { motion, AnimatePresence } from "motion/react";
+import { format } from "date-fns";
+
+export default function ChatView() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userIdParam = searchParams.get("userId");
+  
+  const activeUser = users.find(u => u.id === userIdParam) || null;
+  const { unreadCounts, markAsRead, refreshUnread } = useUnread();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [callState, setCallState] = useState<'audio'|'video'|null>(null);
+  const [isAddingContact, setIsAddingContact] = useState(false);
+  const [newContactName, setNewContactName] = useState("");
+  const [contextMenuUser, setContextMenuUser] = useState<User | null>(null);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [showInfoSidebar, setShowInfoSidebar] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressTriggeredRef = useRef(false);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isTyping]);
+
+  const fetchUsers = () => {
+    fetch("/api/users")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) {
+          const others = data.filter((u: User) => u.id !== "u1");
+          setUsers(others);
+        } else {
+          setUsers([]);
+        }
+      })
+      .catch(err => {
+        console.error("Fetch users error:", err);
+        setUsers([]);
+      });
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    if (activeUser) {
+      markAsRead(activeUser.id);
+      fetch(`/api/chat/${activeUser.id}`)
+        .then(r => r.ok ? r.json() : [])
+        .then(data => {
+          if (Array.isArray(data)) {
+            setMessages(data);
+          } else {
+            setMessages([]);
+          }
+        })
+        .catch(err => {
+          console.error("Fetch messages error:", err);
+          setMessages([]);
+        });
+    } else {
+      setMessages([]);
+    }
+  }, [activeUser]);
+
+  useEffect(() => {
+    if (!activeUser) return;
+    const interval = setInterval(() => {
+      fetch(`/api/chat/${activeUser.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.length > messages.length) {
+            setMessages(data);
+            markAsRead(activeUser.id);
+          }
+        });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [activeUser, messages.length]);
+
+  const handleSend = async () => {
+    if (!input.trim() || !activeUser) return;
+    
+    // Optimistic UI could be here but I'll stick to real for now
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        receiverId: activeUser.id, 
+        text: input,
+        replyTo: replyingTo?.id
+      })
+    });
+    const msg = await res.json();
+    setMessages(prev => [...prev, msg]);
+    setInput("");
+    setReplyingTo(null);
+    setTimeout(refreshUnread, 2500);
+  };
+
+  const handleUserSelect = (u: User) => {
+    setSearchParams({ userId: u.id });
+  };
+
+  const clearActiveUser = () => {
+    setSearchParams({});
+  };
+
+  const handleAddContact = async () => {
+    if (!newContactName.trim()) return;
+    await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newContactName })
+    });
+    setNewContactName("");
+    setIsAddingContact(false);
+    fetchUsers();
+  };
+
+  const handleDeleteContact = async (id: string) => {
+    await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    setUsers(prev => prev.filter(u => u.id !== id));
+    if (activeUser?.id === id) clearActiveUser();
+  };
+
+  const handlePointerDown = (u: User) => {
+    isLongPressTriggeredRef.current = false;
+    pressTimerRef.current = setTimeout(() => {
+      isLongPressTriggeredRef.current = true;
+      setContextMenuUser(u);
+    }, 800); 
+  };
+
+  const handlePointerUp = () => {
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+  };
+
+  const handlePointerLeave = () => {
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+  };
+
+  const handleClickUser = (u: User) => {
+    if (isLongPressTriggeredRef.current) return;
+    handleUserSelect(u);
+  };
+
+  const filteredUsers = users.filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  return (
+    <div className="w-full flex h-full max-h-full md:py-6 md:px-6 max-w-7xl mx-auto relative overflow-hidden">
+      
+      {/* Sidebar - Chat List */}
+      <div className={cn(
+        "w-full md:w-80 flex flex-col glass md:rounded-l-3xl border-r border-white/5 bg-uni-dark/30",
+        activeUser ? "hidden md:flex" : "flex"
+      )}>
+        <div className="p-6 pb-4">
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="font-display font-bold text-2xl tracking-tight text-white">Chat</h1>
+                <button 
+                  onClick={() => setIsAddingContact(true)}
+                  className="p-2.5 text-uni-blue bg-white/5 rounded-2xl hover:bg-white/10 transition-colors border border-white/10"
+                >
+                  <UserPlus size={20} />
+                </button>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-2xl flex items-center px-4 py-3 relative">
+                <Search size={18} className="text-slate-500 mr-3 shrink-0" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar mensagens ou pessoas..." 
+                  className="bg-transparent border-none focus:ring-0 text-sm w-full outline-none placeholder:text-slate-600 font-medium" 
+                />
+            </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 custom-scrollbar space-y-1.5 pb-20">
+            {filteredUsers.map(u => {
+                const unreadCount = unreadCounts[u.id] || 0;
+                const isActive = activeUser?.id === u.id;
+                return (
+                <button 
+                  key={u.id}
+                  onClick={() => handleClickUser(u)}
+                  onPointerDown={() => handlePointerDown(u)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerLeave}
+                  onPointerCancel={handlePointerLeave}
+                  onContextMenu={(e) => { e.preventDefault(); }}
+                  className={cn(
+                    "w-full flex items-center gap-4 p-3.5 rounded-2xl transition-all text-left relative group select-none hover:bg-white/5",
+                    isActive ? "bg-white/10 shadow-lg border border-white/10" : ""
+                  )}
+                >
+                    <div className="relative pointer-events-none">
+                       <img src={u.avatar} alt={u.name} className="w-12 h-12 rounded-2xl object-cover ring-2 ring-transparent group-hover:ring-uni-purple/50 transition-all" />
+                       <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-uni-green rounded-full border-2 border-uni-dark scale-90"></span>
+                    </div>
+                    <div className="flex-1 overflow-hidden pointer-events-none">
+                        <div className="flex items-center justify-between mb-0.5">
+                            <span className={cn("truncate pr-2 text-sm", unreadCount > 0 || isActive ? "font-bold text-white" : "font-semibold text-slate-300")}>{u.name}</span>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider tabular-nums">12:30</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <p className={cn("text-xs truncate", unreadCount > 0 ? "text-slate-100 font-bold" : "text-slate-500 font-medium")}>
+                               {unreadCount > 0 ? "Nova mensagem recebida" : "Histórico de conversa..."}
+                            </p>
+                            {unreadCount > 0 && (
+                                <span className="flex h-5 min-w-[20px] px-1.5 items-center justify-center rounded-full bg-uni-purple text-[10px] font-black text-white shadow-lg animate-pulse">
+                                  {unreadCount}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </button>
+            )})}
+        </div>
+      </div>
+
+      {/* Active Chat Area */}
+      <div className={cn(
+        "flex-1 flex flex-col glass md:rounded-r-3xl relative z-10 w-full h-full overflow-hidden bg-uni-dark/20",
+        !activeUser && "hidden md:flex items-center justify-center"
+      )}>
+        {activeUser ? (
+            <>
+            {/* Header */}
+            <div className="h-20 border-b border-white/10 flex items-center justify-between px-6 flex-shrink-0 bg-uni-darker/40 backdrop-blur-3xl md:rounded-tr-3xl z-20">
+                <div className="flex items-center gap-4">
+                    <button className="md:hidden text-slate-400 hover:text-white transition-colors" onClick={clearActiveUser}>
+                      <ArrowLeft size={24} />
+                    </button>
+                    <div className="relative cursor-pointer group" onClick={() => setShowInfoSidebar(!showInfoSidebar)}>
+                        <img src={activeUser.avatar} className="w-11 h-11 rounded-2xl object-cover border border-white/10 group-hover:scale-105 transition-transform" alt="avatar" />
+                        <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-uni-green rounded-full border-2 border-uni-dark"></span>
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-white flex items-center gap-1.5 leading-none mb-1 cursor-pointer hover:text-uni-purple transition-colors" onClick={() => setShowInfoSidebar(!showInfoSidebar)}>
+                            {activeUser.name}
+                            <Check size={12} className="text-uni-blue" />
+                        </h3>
+                        <span className="text-[10px] uppercase font-black tracking-widest text-uni-green animate-pulse">Online</span>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setCallState('audio')} className="p-2.5 text-slate-400 hover:text-white transition-all hover:bg-white/5 rounded-xl border border-transparent hover:border-white/10"><Phone size={18} /></button>
+                    <button onClick={() => setCallState('video')} className="p-2.5 text-slate-400 hover:text-white transition-all hover:bg-white/5 rounded-xl border border-transparent hover:border-white/10"><Video size={18} /></button>
+                    <div className="w-[1px] h-6 bg-white/10 mx-2 hidden sm:block"></div>
+                    <button onClick={() => setShowInfoSidebar(!showInfoSidebar)} className={cn("p-2.5 transition-all rounded-xl border border-transparent", showInfoSidebar ? "text-uni-purple bg-uni-purple/10 border-uni-purple/20" : "text-slate-400 hover:text-white hover:bg-white/5 hover:border-white/10")}><Info size={18} /></button>
+                </div>
+            </div>
+
+            {/* Messages Container */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col pt-8 relative z-10">
+                <AnimatePresence initial={false}>
+                    {messages.map((m, idx) => {
+                        const isMine = m.senderId === "u1";
+                        const showAvatar = idx === 0 || messages[idx-1].senderId !== m.senderId;
+                        return (
+                            <motion.div 
+                                key={m.id}
+                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                className={cn(
+                                    "flex gap-3 max-w-[85%] group",
+                                    isMine ? "ml-auto flex-row-reverse" : "mr-auto"
+                                )}
+                            >
+                                <div className={cn("w-8 h-8 rounded-xl bg-slate-800 shrink-0 self-end mb-1 overflow-hidden transition-opacity", !showAvatar && "opacity-0")}>
+                                   <img src={isMine ? "https://i.pravatar.cc/150?u=me" : activeUser.avatar} className="w-full h-full object-cover" />
+                                </div>
+                                
+                                <div className={cn("flex flex-col space-y-1.5", isMine ? "items-end" : "items-start")}>
+                                    {m.replyTo && (
+                                        <div className="bg-white/5 px-4 py-2 rounded-2xl border-l-4 border-uni-purple text-xs text-slate-400 mb-1 max-w-full truncate blur-[0.2px]">
+                                            Replying to...
+                                        </div>
+                                    )}
+
+                                    <div className="relative group/msg">
+                                        <div className={cn(
+                                            "px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md relative",
+                                            isMine 
+                                              ? "bg-gradient-to-br from-uni-purple to-uni-blue text-white rounded-tr-none" 
+                                              : "bg-white/10 text-slate-200 rounded-tl-none border border-white/5"
+                                        )}>
+                                            <p className="text-sm md:text-base leading-relaxed">{m.text}</p>
+                                            
+                                            <div className={cn(
+                                                "flex items-center gap-1.5 mt-2 transition-opacity",
+                                                isMine ? "justify-end opacity-70" : "opacity-50"
+                                            )}>
+                                                <span className="text-[10px] font-bold tabular-nums">12:30</span>
+                                                {isMine && <CheckCheck size={12} className="text-white" />}
+                                            </div>
+
+                                            {/* Reactions Popup (Desktop Hover) */}
+                                            <div className={cn(
+                                                "absolute -top-10 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-uni-darker border border-white/10 rounded-full px-2 py-1 flex items-center gap-1 shadow-2xl z-20 pointer-events-none group-hover/msg:pointer-events-auto",
+                                                isMine ? "right-0" : "left-0"
+                                            )}>
+                                                {['👍', '❤️', '🔥', '😂'].map(emoji => (
+                                                    <button key={emoji} className="text-xs hover:scale-125 transition-transform p-1">{emoji}</button>
+                                                ))}
+                                                <button className="p-1 hover:bg-white/10 rounded-full"><SmilePlus size={14} /></button>
+                                            </div>
+                                        </div>
+
+                                        {/* Reply/Forward Actions */}
+                                        <div className={cn(
+                                            "absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition-all",
+                                            isMine ? "right-full mr-3" : "left-full ml-3"
+                                        )}>
+                                            <button onClick={() => setReplyingTo(m)} className="p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors" title="Responder"><Reply size={14} /></button>
+                                            <button className="p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors" title="Encaminhar"><Forward size={14} /></button>
+                                        </div>
+                                    </div>
+                                    
+                                    {m.reactions && m.reactions.length > 0 && (
+                                        <div className="flex gap-1 mt-1">
+                                            {m.reactions.map((r, i) => (
+                                                <span key={i} className="bg-white/10 border border-white/5 rounded-full px-1.5 py-0.5 text-[10px] filter drop-shadow-md">{r.emoji} {r.count}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </motion.div>
+                        );
+                    })}
+                    
+                    {isTyping && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-3 max-w-[85%] items-end pr-8">
+                             <div className="w-8 h-8 rounded-xl bg-slate-800 shrink-0 mb-1 overflow-hidden">
+                               <img src={activeUser.avatar} className="w-full h-full object-cover" />
+                             </div>
+                             <div className="bg-white/10 px-4 py-3 rounded-2xl rounded-tl-none flex gap-1 items-center">
+                                <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce delay-0"></span>
+                                <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce delay-150"></span>
+                                <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce delay-300"></span>
+                             </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+                <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input Wrapper */}
+            <div className="p-5 pb-8 md:pb-6 relative z-20">
+                {replyingTo && (
+                    <div className="absolute bottom-full left-5 right-5 mb-0 bg-uni-dark/95 backdrop-blur-xl border border-white/10 rounded-t-2xl p-3 flex items-center justify-between border-b-uni-purple/50">
+                        <div className="flex items-center gap-3">
+                            <Reply size={16} className="text-uni-purple ml-2" />
+                            <div className="border-l-2 border-uni-purple pl-3">
+                                <p className="text-[10px] font-black text-uni-purple uppercase tracking-widest">{activeUser.name}</p>
+                                <p className="text-xs text-slate-400 line-clamp-1">{replyingTo.text}</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setReplyingTo(null)} className="p-1.5 hover:bg-white/10 rounded-full text-slate-500 transition-colors"><X size={16} /></button>
+                    </div>
+                )}
+
+                <div className={cn(
+                    "flex flex-col bg-uni-darker/60 backdrop-blur-2xl border border-white/10 transition-all",
+                    replyingTo ? "rounded-b-3xl" : "rounded-3xl"
+                )}>
+                    {/* Toolbar */}
+                    <div className="flex items-center gap-1 border-b border-white/5 px-2 py-1.5">
+                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Anexar Arquivo"><Plus size={18} /></button>
+                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Imagens"><ImageIcon size={18} /></button>
+                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Documentos"><File size={18} /></button>
+                        <div className="w-[1px] h-4 bg-white/10 mx-2"></div>
+                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Emojis"><Smile size={18} /></button>
+                    </div>
+
+                    <div className="flex items-center gap-3 p-2.5">
+                        <textarea 
+                          rows={1}
+                          value={input}
+                          onChange={e => {
+                            setInput(e.target.value);
+                            // Simulate typing
+                            if (!isTyping) {
+                                setIsTyping(true);
+                                setTimeout(() => setIsTyping(false), 2000);
+                            }
+                          }}
+                          onKeyDown={e => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleSend();
+                              }
+                          }}
+                          placeholder="Mensagem..."
+                          className="flex-1 bg-transparent border-none focus:ring-0 text-sm md:text-base px-4 min-h-[44px] py-2.5 max-h-32 resize-none outline-none text-white font-medium"
+                        />
+                        <button 
+                          onClick={handleSend}
+                          disabled={!input.trim()}
+                          className="w-11 h-11 bg-gradient-to-r from-uni-purple to-uni-blue rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 disabled:grayscale disabled:opacity-50"
+                        >
+                            <Send size={18} className="text-white ml-0.5" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+            </>
+        ) : (
+            <div className="flex flex-col items-center justify-center text-slate-600 animate-in fade-in duration-700">
+                <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center mb-6">
+                    <MessageCircle size={40} className="opacity-20" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-400 mb-2">Conectando ao Ecossistema</h2>
+                <p className="text-sm font-medium opacity-50">Selecione uma conversa para iniciar a jornada.</p>
+            </div>
+        )}
+
+        {/* Info Sidebar Overlay */}
+        <AnimatePresence>
+            {showInfoSidebar && activeUser && (
+                <motion.div 
+                    initial={{ x: '100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '100%' }}
+                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                    className="absolute top-0 right-0 h-full w-80 bg-uni-darker/95 backdrop-blur-3xl border-l border-white/10 z-[25] p-8 overflow-y-auto custom-scrollbar shadow-[-20px_0_40px_rgba(0,0,0,0.4)]"
+                >
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Perfil Premium</h2>
+                        <button onClick={() => setShowInfoSidebar(false)} className="p-2 hover:bg-white/5 rounded-xl transition-colors"><X size={20} /></button>
+                    </div>
+
+                    <div className="flex flex-col items-center text-center mb-10">
+                        <div className="relative mb-4 group cursor-pointer">
+                            <img src={activeUser.avatar} className="w-28 h-28 rounded-3xl object-cover ring-4 ring-uni-purple/20 group-hover:ring-uni-purple transition-all" />
+                            <div className="absolute inset-0 bg-uni-purple/20 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                                <Search size={20} className="text-white" />
+                            </div>
+                        </div>
+                        <h3 className="text-2xl font-display font-bold text-white mb-1">{activeUser.name}</h3>
+                        <p className="text-sm font-bold text-uni-blue tracking-tight mb-4 flex items-center gap-1">
+                            {activeUser.handle}
+                            <div className="w-1.5 h-1.5 rounded-full bg-uni-green"></div>
+                        </p>
+                        
+                        <div className="flex gap-2 w-full">
+                            <button className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest border border-white/10 transition-colors">Perfil</button>
+                            <button className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest border border-white/10 transition-colors">Seguir</button>
+                        </div>
+                    </div>
+
+                    <div className="space-y-8">
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Mídias Compartilhadas</h4>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[1,2,3,4,5,6].map(i => (
+                                    <div key={i} className="aspect-square bg-white/5 rounded-xl overflow-hidden hover:scale-105 transition-transform cursor-pointer border border-white/10">
+                                        <img src={`https://picsum.photos/seed/${activeUser.id}${i}/200`} className="w-full h-full object-cover" />
+                                    </div>
+                                ))}
+                            </div>
+                            <button className="text-[10px] font-black text-uni-blue uppercase tracking-widest hover:underline w-full pt-2">Ver tudo</button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Configurações</h4>
+                            <div className="space-y-2">
+                                <button className="w-full flex items-center justify-between p-3.5 bg-white/5 hover:bg-white/10 rounded-2xl transition-colors text-sm font-bold text-slate-300">
+                                    Silenciar Notificações
+                                    <div className="w-10 h-5 bg-uni-purple/20 rounded-full relative"><div className="absolute top-1 left-1 w-3 h-3 bg-uni-purple rounded-full"></div></div>
+                                </button>
+                                <button className="w-full flex items-center justify-between p-3.5 bg-white/5 hover:bg-white/10 rounded-2xl transition-colors text-sm font-bold text-slate-300">
+                                    Mensagens Temporárias
+                                    <span className="text-[10px] text-slate-500">OFF</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <button className="w-full p-4 border border-red-500/20 text-red-500 text-[10px] font-black uppercase tracking-widest hover:bg-red-500/10 rounded-xl transition-all">Denunciar / Bloquear</button>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+      </div>
+
+      {/* Call Overlay, Modals... same as before but styled */}
+
+      {/* Call Overlay */}
+      {callState && activeUser && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-uni-darker/90 backdrop-blur-2xl text-white">
+            <div className="relative mb-8">
+                <img src={activeUser.avatar} alt={activeUser.name} className="w-32 h-32 rounded-full border-4 border-uni-blue object-cover" />
+                <div className="absolute inset-0 rounded-full border-4 border-uni-purple animate-ping opacity-50"></div>
+            </div>
+            <h2 className="text-4xl font-display font-bold mb-2">{activeUser.name}</h2>
+            <p className="text-uni-green mb-12 text-lg">
+                {callState === 'video' ? 'Chamada de Vídeo...' : 'Chamada de Áudio...'}
+            </p>
+            <div className="flex gap-6">
+                <button onClick={() => setCallState(null)} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+                    <Phone className="text-white transform rotate-[135deg]" size={28} />
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* Context Menu Modal */}
+      {contextMenuUser && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-4 bg-uni-darker/60 backdrop-blur-sm" onClick={() => setContextMenuUser(null)}>
+          <div className="glass-card w-full max-w-sm p-4 animate-in slide-in-from-bottom-8 md:zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+             <div className="flex items-center gap-4 border-b border-white/10 pb-4 mb-4">
+                 <img src={contextMenuUser.avatar} className="w-12 h-12 rounded-full pointer-events-none" />
+                 <div>
+                     <h3 className="font-semibold text-lg">{contextMenuUser.name}</h3>
+                     <p className="text-sm text-slate-400">{contextMenuUser.handle}</p>
+                 </div>
+             </div>
+             
+             <div className="flex flex-col gap-2">
+                 <button 
+                    onClick={() => { alert(`Enviando contato: ${contextMenuUser.name}`); setContextMenuUser(null); }}
+                    className="flex items-center gap-3 w-full p-3 hover:bg-white/5 rounded-xl transition-colors text-left"
+                 >
+                     <Send size={20} className="text-uni-blue" />
+                     <span>Enviar Contato</span>
+                 </button>
+                 <button 
+                    onClick={() => { setUserToDelete(contextMenuUser); setContextMenuUser(null); }}
+                    className="flex items-center gap-3 w-full p-3 hover:bg-white/5 rounded-xl transition-colors text-left text-red-500"
+                 >
+                     <Trash2 size={20} />
+                     <span>Excluir Contato</span>
+                 </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-uni-darker/80 backdrop-blur-xl" onClick={() => setUserToDelete(null)}>
+          <div className="glass-card w-full max-w-sm p-6 relative animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="w-12 h-12 bg-red-500/20 text-red-500 rounded-xl flex items-center justify-center mb-4">
+               <Trash2 size={24} />
+            </div>
+            <h2 className="text-2xl font-display font-bold mb-2">Excluir {userToDelete.name}?</h2>
+            <p className="text-sm text-slate-400 mb-6">Esta ação é irreversível. O contato e o histórico de mensagens serão removidos do seu ecossistema.</p>
+            
+            <div className="flex gap-3">
+                <button 
+                  onClick={() => setUserToDelete(null)}
+                  className="flex-1 bg-white/5 hover:bg-white/10 py-3 rounded-xl font-medium text-white transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => { handleDeleteContact(userToDelete.id); setUserToDelete(null); }}
+                  className="flex-1 bg-red-500 hover:bg-red-600 py-3 rounded-xl font-medium text-white shadow-[0_0_20px_rgba(239,68,68,0.4)] transition-colors"
+                >
+                  Excluir
+                </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Contact Modal */}
+      {isAddingContact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-uni-darker/80 backdrop-blur-xl">
+          <div className="glass-card w-full max-w-sm p-6 relative animate-in fade-in zoom-in duration-200">
+            <button 
+              onClick={() => setIsAddingContact(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="w-12 h-12 bg-uni-purple/20 text-uni-purple rounded-xl flex items-center justify-center mb-4">
+               <UserPlus size={24} />
+            </div>
+            <h2 className="text-2xl font-display font-bold mb-2">Novo Contato</h2>
+            <p className="text-sm text-slate-400 mb-6">Encontre e adicione novas pessoas ao seu ecossistema Üni.</p>
+            
+            <input 
+              type="text" 
+              value={newContactName}
+              onChange={e => setNewContactName(e.target.value)}
+              placeholder="Nome ou @handle"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white mb-6 focus:ring-2 focus:ring-uni-purple outline-none transition-all"
+              autoFocus
+            />
+            
+            <button 
+              onClick={handleAddContact}
+              disabled={!newContactName.trim()}
+              className="w-full bg-gradient-to-r from-uni-purple to-uni-blue py-3 rounded-xl font-medium text-white shadow-lg disabled:opacity-50 hover:shadow-[0_0_20px_rgba(139,92,246,0.4)] transition-all"
+            >
+              Adicionar ao Ecossistema
+            </button>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
