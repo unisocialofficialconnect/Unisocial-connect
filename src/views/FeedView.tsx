@@ -22,6 +22,8 @@ export default function FeedView() {
   const [commentText, setCommentText] = useState("");
   const [commentImage, setCommentImage] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [postImageFile, setPostImageFile] = useState<File | null>(null);
   const [sharePostId, setSharePostId] = useState<string | null>(null);
   const [postComments, setPostComments] = useState<Record<string, any[]>>({});
   const [showLikesModal, setShowLikesModal] = useState<string | null>(null);
@@ -129,22 +131,50 @@ export default function FeedView() {
   };
 
   const handlePost = async () => {
-    if (!newPost.trim() || !user) return;
+    if ((!newPost.trim() && !postImageFile) || !user) return;
     setSubmitting(true);
     try {
+      let uploadedImageUrl = null;
+      if (postImageFile) {
+         const fileExt = postImageFile.name.split('.').pop();
+         const fileName = `${Math.random()}.${fileExt}`;
+         const filePath = `${user.id}/${fileName}`;
+         
+         const { error: uploadError, data } = await supabase.storage.from('media').upload(filePath, postImageFile);
+         if (uploadError) throw uploadError;
+         
+         const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(filePath);
+         uploadedImageUrl = publicUrl;
+      }
+
       await supabase.from('posts').insert([{
         userId: user.id,
         text: newPost,
+        image: uploadedImageUrl,
         likes: 0,
         comments: 0,
         likedBy: [],
         timestamp: new Date().toISOString()
       }]);
       setNewPost("");
+      setPostImage(null);
+      setPostImageFile(null);
     } catch(e: any) {
       alert("Erro ao publicar: " + e.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePostImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPostImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPostImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -283,7 +313,7 @@ export default function FeedView() {
             />
           </div>
 
-          {/* Stories */}
+           {/* Stories (Somente seu story para produção) */}
           <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar no-scrollbar scroll-smooth">
              <div className="flex flex-col items-center gap-2 group cursor-pointer shrink-0">
                 <div className="w-16 h-16 rounded-full p-1 border-2 border-dashed border-slate-700 group-hover:border-uni-purple transition-colors relative">
@@ -294,14 +324,6 @@ export default function FeedView() {
                 </div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Seu Story</span>
              </div>
-             {[1, 2, 3, 4, 5].map((s) => (
-                <div key={s} className="flex flex-col items-center gap-2 group cursor-pointer shrink-0">
-                   <div className="w-16 h-16 rounded-full p-1 border-2 border-uni-purple group-hover:scale-105 transition-transform">
-                      <img src={`https://i.pravatar.cc/150?u=s${s}`} alt="User" className="w-full h-full rounded-full object-cover" />
-                   </div>
-                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">@user_{s}</span>
-                </div>
-             ))}
           </div>
 
           {/* Create Post */}
@@ -315,18 +337,28 @@ export default function FeedView() {
                   placeholder="O que está acontecendo no seu mundo?"
                   className="w-full bg-transparent border-none resize-none focus:ring-0 text-lg placeholder:text-slate-500 min-h-[80px] outline-none text-white font-medium"
                 />
+                {postImage && (
+                    <div className="mt-2 relative inline-block rounded-xl overflow-hidden border border-white/10">
+                        <img src={postImage} alt="Preview" className="max-h-40 object-cover" />
+                        <button onClick={() => { setPostImage(null); setPostImageFile(null); }} className="absolute top-1 right-1 bg-black/50 p-1 rounded-full text-white hover:bg-red-500/80 transition-colors">
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
                 <div className="flex items-center justify-between mt-4">
                   <div className="flex items-center gap-2">
-                    <button className="p-2.5 text-slate-400 hover:text-uni-blue hover:bg-uni-blue/10 rounded-xl transition-colors border border-transparent hover:border-uni-blue/20">
+                    <label className="cursor-pointer p-2.5 text-slate-400 hover:text-uni-blue hover:bg-uni-blue/10 rounded-xl transition-colors border border-transparent hover:border-uni-blue/20">
                       <ImageIcon size={20} />
-                    </button>
-                    <button className="p-2.5 text-slate-400 hover:text-uni-green hover:bg-uni-green/10 rounded-xl transition-colors border border-transparent hover:border-uni-green/20">
+                      <input type="file" accept="image/*,video/*" className="hidden" onChange={handlePostImageSelect} />
+                    </label>
+                    <label className="cursor-pointer p-2.5 text-slate-400 hover:text-uni-green hover:bg-uni-green/10 rounded-xl transition-colors border border-transparent hover:border-uni-green/20">
                       <div className="w-5 h-5 flex items-center justify-center border-2 border-current rounded text-xs font-bold">GIF</div>
-                    </button>
+                      <input type="file" accept=".gif,image/gif" className="hidden" onChange={handlePostImageSelect} />
+                    </label>
                   </div>
                   <button 
                     onClick={handlePost}
-                    disabled={!newPost.trim() || submitting}
+                    disabled={(!newPost.trim() && !postImageFile) || submitting}
                     className="bg-gradient-to-r from-uni-purple to-uni-blue px-8 py-2.5 rounded-full font-bold text-white shadow-lg hover:shadow-uni-purple/40 transition-all disabled:opacity-50 flex items-center justify-center min-w-[120px]"
                   >
                     {submitting ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : "Publicar"}
@@ -510,29 +542,7 @@ export default function FeedView() {
            <button className="w-full mt-8 py-2.5 text-xs font-black text-uni-blue uppercase tracking-tighter hover:underline">Ver mais tendências</button>
         </section>
 
-        {/* Sugestões de Pessoas */}
-        <section className="glass-card p-6 border border-white/5">
-           <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-              <UserPlus size={20} className="text-uni-blue" />
-              👥 Pessoas para seguir
-           </h3>
-           <div className="space-y-5">
-             {[1, 2, 3].map((u) => (
-                <div key={u} className="flex items-center justify-between">
-                   <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-slate-800 border border-white/5 overflow-hidden">
-                         <img src={`https://i.pravatar.cc/150?u=follow${u}`} alt="User" />
-                      </div>
-                      <div>
-                         <p className="text-sm font-bold text-white">Usuário_{u}</p>
-                         <p className="text-[10px] text-slate-500 font-bold uppercase">@handle_{u}</p>
-                      </div>
-                   </div>
-                   <button className="px-4 py-1.5 rounded-full bg-white text-uni-dark text-[10px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors">Seguir</button>
-                </div>
-             ))}
-           </div>
-        </section>
+        {/* AI Insight Sidebar Ocultado ou Reduzido para Produção - Como não há bots, recomendação está estática, mantemos por UI. */}
 
         {/* AI Insight Sidebar */}
         <section className="glass-card p-6 bg-gradient-to-tr from-uni-purple/10 via-uni-blue/10 to-transparent border border-uni-purple/20">

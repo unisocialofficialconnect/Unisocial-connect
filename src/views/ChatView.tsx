@@ -6,15 +6,18 @@ import { cn } from "../utils";
 import { useUnread } from "../UnreadContext";
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function ChatView() {
-  const [users, setUsers] = useState<User[]>([]);
+  const { user } = useAuth();
+  const [users, setUsers] = useState<any[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const userIdParam = searchParams.get("userId");
   
   const activeUser = users.find(u => u.id === userIdParam) || null;
   const { unreadCounts, markAsRead, refreshUnread } = useUnread();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [callState, setCallState] = useState<'audio'|'video'|null>(null);
@@ -38,81 +41,74 @@ export default function ChatView() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const fetchUsers = () => {
-    fetch("/api/users")
-      .then(r => r.ok ? r.json() : [])
-      .then(data => {
-        if (Array.isArray(data)) {
-          const others = data.filter((u: User) => u.id !== "u1");
-          setUsers(others);
-        } else {
-          setUsers([]);
-        }
-      })
-      .catch(err => {
-        console.error("Fetch users error:", err);
-        setUsers([]);
-      });
+  const fetchUsers = async () => {
+    if (!user) return;
+    const { data, error } = await supabase.from('users').select('*').neq('id', user.id);
+    if (!error && data) {
+       setUsers(data);
+    }
   };
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [user]);
+
+  const fetchMessages = async () => {
+     if (!activeUser || !user) return;
+     const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${activeUser.id}),and(sender_id.eq.${activeUser.id},receiver_id.eq.${user.id})`)
+        .order('created_at', { ascending: true });
+        
+     if (!error && data) {
+        setMessages(data);
+        markAsRead(activeUser.id);
+     }
+  };
 
   useEffect(() => {
-    if (activeUser) {
-      markAsRead(activeUser.id);
-      fetch(`/api/chat/${activeUser.id}`)
-        .then(r => r.ok ? r.json() : [])
-        .then(data => {
-          if (Array.isArray(data)) {
-            setMessages(data);
-          } else {
-            setMessages([]);
-          }
-        })
-        .catch(err => {
-          console.error("Fetch messages error:", err);
-          setMessages([]);
-        });
+    if (activeUser && user) {
+      fetchMessages();
+
+      const channel = supabase.channel(`public:messages`)
+         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+            const newMessage = payload.new;
+            if (
+               (newMessage.sender_id === user.id && newMessage.receiver_id === activeUser.id) ||
+               (newMessage.sender_id === activeUser.id && newMessage.receiver_id === user.id)
+            ) {
+               setMessages(prev => [...prev, newMessage]);
+               markAsRead(activeUser.id);
+            }
+         })
+         .subscribe();
+         
+      return () => {
+         supabase.removeChannel(channel);
+      };
     } else {
       setMessages([]);
     }
-  }, [activeUser]);
-
-  useEffect(() => {
-    if (!activeUser) return;
-    const interval = setInterval(() => {
-      fetch(`/api/chat/${activeUser.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.length > messages.length) {
-            setMessages(data);
-            markAsRead(activeUser.id);
-          }
-        });
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [activeUser, messages.length]);
+  }, [activeUser, user]);
 
   const handleSend = async () => {
-    if (!input.trim() || !activeUser) return;
+    if (!input.trim() || !activeUser || !user) return;
     
-    // Optimistic UI could be here but I'll stick to real for now
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        receiverId: activeUser.id, 
-        text: input,
-        replyTo: replyingTo?.id
-      })
-    });
-    const msg = await res.json();
-    setMessages(prev => [...prev, msg]);
+    const newMsg = { 
+      sender_id: user.id,
+      receiver_id: activeUser.id, 
+      text: input,
+      created_at: new Date().toISOString()
+    };
+    
+    // Optimistic UI
+    setMessages(prev => [...prev, { ...newMsg, id: Math.random().toString() }]);
     setInput("");
     setReplyingTo(null);
-    setTimeout(refreshUnread, 2500);
+
+    await supabase.from('messages').insert([newMsg]);
+    setTimeout(refreshUnread, 1500);
   };
 
   const handleUserSelect = (u: User) => {
@@ -274,8 +270,8 @@ export default function ChatView() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col pt-8 relative z-10">
                 <AnimatePresence initial={false}>
                     {messages.map((m, idx) => {
-                        const isMine = m.senderId === "u1";
-                        const showAvatar = idx === 0 || messages[idx-1].senderId !== m.senderId;
+                        const isMine = m.sender_id === user?.id;
+                        const showAvatar = idx === 0 || messages[idx-1].sender_id !== m.sender_id;
                         return (
                             <motion.div 
                                 key={m.id}
