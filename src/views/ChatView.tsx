@@ -463,8 +463,9 @@ export default function ChatView() {
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 className={cn(
-                                    "flex gap-3 max-w-[85%] group",
-                                    isMine ? "ml-auto flex-row-reverse" : "mr-auto"
+                                    "flex gap-3 max-w-[85%] group relative transition-all",
+                                    isMine ? "ml-auto flex-row-reverse" : "mr-auto",
+                                    activeReactionMsgId === m.id ? "z-50" : "z-10"
                                 )}
                             >
                                 <div className={cn("w-8 h-8 rounded-xl bg-slate-800 shrink-0 self-end mb-1 overflow-hidden transition-opacity", !showAvatar && "opacity-0")}>
@@ -479,17 +480,15 @@ export default function ChatView() {
                                     )}
 
                                     <div 
-                                        className="relative group/msg" 
+                                        className={cn("relative group/msg transition-all", activeReactionMsgId === m.id ? "scale-105" : "")} 
                                         onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}
                                         onPointerDown={(e) => {
-                                            if (e.pointerType !== 'mouse') {
-                                                isLongPressTriggeredRef.current = false;
-                                                pressTimerRef.current = setTimeout(() => {
-                                                    isLongPressTriggeredRef.current = true;
-                                                    setActiveReactionMsgId(m.id);
-                                                    if (navigator.vibrate) navigator.vibrate(50);
-                                                }, 500);
-                                            }
+                                            isLongPressTriggeredRef.current = false;
+                                            pressTimerRef.current = setTimeout(() => {
+                                                isLongPressTriggeredRef.current = true;
+                                                setActiveReactionMsgId(m.id);
+                                                if (navigator.vibrate) navigator.vibrate(50);
+                                            }, 500);
                                         }}
                                         onPointerUp={() => {
                                             if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
