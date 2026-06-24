@@ -12,6 +12,7 @@ import { NotificationsDropdown } from "../components/NotificationsDropdown";
 export default function FeedView() {
   const [posts, setPosts] = useState<any[]>([]);
   const [newPost, setNewPost] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [postLikes, setPostLikes] = useState<Record<string, {count: number, likedByMe: boolean}>>({});
   const { user, profile } = useAuth();
   const avatarUrl = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
@@ -316,12 +317,18 @@ export default function FeedView() {
 
   const getShareLink = () => `${window.location.origin}/#post-${sharePostId}`;
 
-  const displayPosts = posts.map(post => {
-    if (post.userId === user?.id && profile) {
-      return { ...post, user: { ...post.user, ...profile } };
-    }
-    return post;
-  });
+  const displayPosts = posts
+    .filter(post => {
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase();
+      return post.text?.toLowerCase().includes(term) || post.user?.name?.toLowerCase().includes(term);
+    })
+    .map(post => {
+      if (post.userId === user?.id && profile) {
+        return { ...post, user: { ...post.user, ...profile } };
+      }
+      return post;
+    });
 
   const getDisplayComments = (postId: string) => {
     return (postComments[postId] || []).map(comment => {
@@ -561,15 +568,22 @@ export default function FeedView() {
       </div>
 
       {/* Right Sidebar */}
-      <aside className="hidden xl:flex w-80 h-full overflow-y-auto custom-scrollbar border-l border-white/5 py-10 px-6 space-y-10">
+      <aside className="hidden xl:flex flex-col w-80 h-full overflow-y-auto custom-scrollbar border-l border-white/5 py-10 px-6 space-y-10 shrink-0">
         {/* Search */}
         <div className="relative">
            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
            <input 
               type="text" 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
               placeholder="Busca Inteligente Üni"
-              className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 focus:ring-uni-purple outline-none transition-all placeholder:text-slate-600 font-medium"
+              className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 focus:ring-uni-purple outline-none transition-all placeholder:text-slate-600 font-medium text-white"
            />
+           {searchTerm && (
+             <button onClick={() => setSearchTerm('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+               <X size={16} />
+             </button>
+           )}
         </div>
 
         {/* Em Alta */}
@@ -581,11 +595,11 @@ export default function FeedView() {
            <div className="space-y-5">
               {[
                 { label: "#UniSocial", posts: "245k posts" },
-                { label: "Üni AI v2", posts: "128k posts" },
+                { label: "Üni AI", posts: "128k posts" },
                 { label: "#Marketplace", posts: "89k posts" },
                 { label: "#Web3", posts: "54k posts" },
               ].map((trend, i) => (
-                <div key={i} className="group cursor-pointer">
+                <div key={i} className="group cursor-pointer" onClick={() => setSearchTerm(trend.label)}>
                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">{trend.posts}</p>
                    <p className="font-bold text-white group-hover:text-uni-purple transition-colors">{trend.label}</p>
                 </div>
