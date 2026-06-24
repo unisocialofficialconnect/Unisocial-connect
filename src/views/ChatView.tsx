@@ -482,7 +482,7 @@ export default function ChatView() {
                                     <div 
                                         className={cn("relative group/msg transition-all", activeReactionMsgId === m.id ? "scale-105" : "")} 
                                         onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}
-                                        onPointerDown={(e) => {
+                                        onTouchStart={() => {
                                             isLongPressTriggeredRef.current = false;
                                             pressTimerRef.current = setTimeout(() => {
                                                 isLongPressTriggeredRef.current = true;
@@ -490,13 +490,22 @@ export default function ChatView() {
                                                 if (navigator.vibrate) navigator.vibrate(50);
                                             }, 500);
                                         }}
-                                        onPointerUp={() => {
+                                        onTouchMove={() => {
                                             if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
                                         }}
-                                        onPointerLeave={() => {
+                                        onTouchEnd={() => {
                                             if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
                                         }}
-                                        onPointerCancel={() => {
+                                        onMouseDown={() => {
+                                            // Desktop fallback
+                                            pressTimerRef.current = setTimeout(() => {
+                                                setActiveReactionMsgId(m.id);
+                                            }, 500);
+                                        }}
+                                        onMouseUp={() => {
+                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                        }}
+                                        onMouseLeave={() => {
                                             if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
                                         }}
                                         style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}
