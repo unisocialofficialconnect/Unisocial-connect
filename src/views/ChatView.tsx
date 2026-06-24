@@ -540,19 +540,19 @@ export default function ChatView() {
                                                 <span className="text-[10px] font-bold tabular-nums">{format(new Date(m.created_at), 'HH:mm')}</span>
                                                 {isMine && <CheckCheck size={12} className="text-white" />}
                                             </div>
+                                        </div>
 
-                                            {/* Reactions Popup (Desktop Hover & Mobile Long Press) */}
-                                            <div className={cn(
-                                                "absolute -top-24 transition-all bg-uni-darker/95 backdrop-blur-3xl border border-white/10 rounded-2xl p-2 flex items-center justify-start shadow-2xl z-50 flex-wrap w-[280px] max-h-32 overflow-y-auto custom-scrollbar",
-                                                activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95 md:group-hover/msg:opacity-100 md:group-hover/msg:pointer-events-auto md:group-hover/msg:scale-100",
-                                                isMine ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left"
-                                            )}>
-                                                {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
-                                                    <button key={emoji} onClick={() => { setActiveReactionMsgId(null); /* Aqui você deve ligar à função de adicionar reação do Supabase */ }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
-                                                        {emoji}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                        {/* Reactions Popup (Desktop Hover & Mobile Long Press) - Movid to outside backdrop-blur div to fix iOS Safari clipping */}
+                                        <div className={cn(
+                                            "absolute -top-24 transition-all bg-uni-darker/95 backdrop-blur-3xl border border-white/10 rounded-2xl p-2 flex items-center justify-start shadow-2xl z-50 flex-wrap w-[280px] max-h-32 overflow-y-auto custom-scrollbar",
+                                            activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95 md:group-hover/msg:opacity-100 md:group-hover/msg:pointer-events-auto md:group-hover/msg:scale-100",
+                                            isMine ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left"
+                                        )}>
+                                            {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
+                                                <button key={emoji} onClick={() => { setActiveReactionMsgId(null); /* Aqui você deve ligar à função de adicionar reação do Supabase */ }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
+                                                    {emoji}
+                                                </button>
+                                            ))}
                                         </div>
 
                                         {/* Reply/Forward Actions */}
