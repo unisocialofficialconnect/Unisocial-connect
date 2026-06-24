@@ -52,6 +52,7 @@ export default function ChatView() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPressTriggeredRef = useRef(false);
+  const touchStartRef = useRef<{x: number, y: number} | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -482,16 +483,25 @@ export default function ChatView() {
                                     <div 
                                         className={cn("relative group/msg transition-all", activeReactionMsgId === m.id ? "scale-105" : "")} 
                                         onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}
-                                        onTouchStart={() => {
+                                        onTouchStart={(e) => {
                                             isLongPressTriggeredRef.current = false;
+                                            const touch = e.touches[0];
+                                            touchStartRef.current = { x: touch.clientX, y: touch.clientY };
                                             pressTimerRef.current = setTimeout(() => {
                                                 isLongPressTriggeredRef.current = true;
                                                 setActiveReactionMsgId(m.id);
                                                 if (navigator.vibrate) navigator.vibrate(50);
                                             }, 500);
                                         }}
-                                        onTouchMove={() => {
-                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                        onTouchMove={(e) => {
+                                            if (!touchStartRef.current) return;
+                                            const touch = e.touches[0];
+                                            const dx = Math.abs(touch.clientX - touchStartRef.current.x);
+                                            const dy = Math.abs(touch.clientY - touchStartRef.current.y);
+                                            if (dx > 10 || dy > 10) {
+                                                if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                                touchStartRef.current = null;
+                                            }
                                         }}
                                         onTouchEnd={() => {
                                             if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
