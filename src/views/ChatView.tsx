@@ -478,7 +478,30 @@ export default function ChatView() {
                                         </div>
                                     )}
 
-                                    <div className="relative group/msg" onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}>
+                                    <div 
+                                        className="relative group/msg" 
+                                        onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}
+                                        onPointerDown={(e) => {
+                                            if (e.pointerType !== 'mouse') {
+                                                isLongPressTriggeredRef.current = false;
+                                                pressTimerRef.current = setTimeout(() => {
+                                                    isLongPressTriggeredRef.current = true;
+                                                    setActiveReactionMsgId(m.id);
+                                                    if (navigator.vibrate) navigator.vibrate(50);
+                                                }, 500);
+                                            }
+                                        }}
+                                        onPointerUp={() => {
+                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                        }}
+                                        onPointerLeave={() => {
+                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                        }}
+                                        onPointerCancel={() => {
+                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+                                        }}
+                                        style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}
+                                    >
                                         <div className={cn(
                                             "px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md relative",
                                             isMine 
