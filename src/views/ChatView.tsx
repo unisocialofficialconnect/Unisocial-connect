@@ -37,9 +37,13 @@ export default function ChatView() {
   // Audio Recording States
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [dragX, setDragX] = useState(0);
+  const [isOverTrash, setIsOverTrash] = useState(false);
+  const [recordStartX, setRecordStartX] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const timerIntervalRef = useRef<any>(null);
+  const micBtnRef = useRef<HTMLButtonElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -588,20 +592,55 @@ export default function ChatView() {
                         )}
                     </div>
 
-                    <div className="flex items-center gap-3 p-2.5">
-                        {isRecording ? (
-                            <div className="flex-1 bg-white/5 rounded-2xl flex items-center justify-between px-4 min-h-[44px] py-2.5 outline-none text-red-500 font-medium">
-                                <div className="flex items-center gap-2 animate-pulse">
-                                    <Mic size={18} className="text-red-500" />
-                                    <span>Gravando áudio...</span>
+                    <div className="flex items-center gap-3 p-2.5 relative">
+                        {/* Slide-to-cancel hint and trash zone */}
+                        {isRecording && (
+                            <div className="absolute inset-x-3 top-0 bottom-0 flex items-center pointer-events-none z-10">
+                                {/* Recording waveform + hint */}
+                                <div
+                                    className="flex-1 rounded-2xl flex items-center justify-between px-4 min-h-[44px] overflow-hidden"
+                                    style={{ background: 'rgba(255,255,255,0.05)' }}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                                        <div className="flex items-end gap-0.5">
+                                            {[12,20,8,24,16,10,22,14,18].map((h, i) => (
+                                                <span
+                                                    key={i}
+                                                    className="bg-uni-purple/70 rounded-full"
+                                                    style={{ width: 3, height: h, animation: `pulse ${0.4 + i * 0.07}s ease-in-out infinite alternate` }}
+                                                />
+                                            ))}
+                                        </div>
+                                        <span className="text-white font-mono text-sm">{formatTime(recordingTime)}</span>
+                                    </div>
+                                    <div
+                                        className="flex items-center gap-1 text-slate-400 transition-all"
+                                        style={{ transform: `translateX(${Math.min(0, dragX * 0.4)}px)`, opacity: Math.max(0.2, 1 + dragX * 0.01) }}
+                                    >
+                                        <span className="text-xs font-medium">◀ Deslize para cancelar</span>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                   <span className="text-white font-mono">{formatTime(recordingTime)}</span>
-                                   <button onPointerDown={(e) => { e.stopPropagation(); cancelRecording(); }} className="text-slate-400 hover:text-white px-2 py-1 rounded-full hover:bg-white/10 transition-colors">Cancelar</button>
+
+                                {/* Trash zone - appears when dragged left */}
+                                <div
+                                    className={cn(
+                                        "ml-2 w-12 h-11 rounded-2xl flex items-center justify-center transition-all duration-200 shrink-0",
+                                        isOverTrash
+                                            ? "bg-red-500 scale-110 shadow-lg shadow-red-500/40"
+                                            : dragX < -60
+                                                ? "bg-red-500/30 border border-red-500/50"
+                                                : "bg-white/5 border border-white/10 opacity-50"
+                                    )}
+                                >
+                                    <Trash2 size={18} className={isOverTrash ? "text-white" : "text-slate-400"} />
                                 </div>
                             </div>
-                        ) : (
-                            <textarea 
+                        )}
+
+                        {/* Input or invisible spacer during recording */}
+                        {!isRecording && (
+                            <textarea
                               rows={1}
                               value={input}
                               onChange={e => {
@@ -621,28 +660,55 @@ export default function ChatView() {
                               className="flex-1 bg-transparent border-none focus:ring-0 text-sm md:text-base px-4 min-h-[44px] py-2.5 max-h-32 resize-none outline-none text-white font-medium"
                             />
                         )}
-                        <button 
+                        {isRecording && <div className="flex-1" />}
+
+                        <button
+                          ref={micBtnRef}
                           onPointerDown={(e) => {
                               if (!input.trim() && !selectedFile) {
                                   e.preventDefault();
+                                  (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                                  setRecordStartX(e.clientX);
+                                  setDragX(0);
+                                  setIsOverTrash(false);
                                   startRecording();
+                              }
+                          }}
+                          onPointerMove={(e) => {
+                              if (isRecording) {
+                                  const dx = e.clientX - recordStartX;
+                                  setDragX(dx);
+                                  setIsOverTrash(dx < -100);
                               }
                           }}
                           onPointerUp={(e) => {
                               if (isRecording) {
                                   e.preventDefault();
-                                  stopRecording();
+                                  if (isOverTrash || dragX < -100) {
+                                      cancelRecording();
+                                  } else {
+                                      stopRecording();
+                                  }
+                                  setDragX(0);
+                                  setIsOverTrash(false);
                               } else if (input.trim() || selectedFile) {
                                   handleSend();
                               }
                           }}
                           onPointerCancel={() => {
                               if (isRecording) cancelRecording();
+                              setDragX(0);
+                              setIsOverTrash(false);
                           }}
-                          style={{ touchAction: 'none' }}
+                          style={{ touchAction: 'none', zIndex: 20 }}
                           disabled={submitting}
-                          className={cn("w-11 h-11 rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 shrink-0", 
-                            isRecording ? "bg-red-500 animate-pulse" : "bg-gradient-to-r from-uni-purple to-uni-blue",
+                          className={cn(
+                            "w-11 h-11 rounded-2xl flex items-center justify-center transition-all shadow-lg shadow-uni-purple/20 shrink-0 select-none",
+                            isRecording && isOverTrash
+                                ? "bg-red-500 scale-110"
+                                : isRecording
+                                    ? "bg-red-500 animate-pulse"
+                                    : "bg-gradient-to-r from-uni-purple to-uni-blue hover:scale-105 active:scale-95",
                             submitting && "grayscale opacity-50 pointer-events-none"
                           )}
                         >
