@@ -33,15 +33,33 @@ export default function FeedView() {
   const fetchPosts = async () => {
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        user:users(*)
-      `)
+      .select('*')
       .order('timestamp', { ascending: false });
       
-    if (!error && data) {
-      setPosts(data);
+    if (error) {
+      console.error('Erro ao buscar posts:', error.message);
+      return;
     }
+    if (!data || data.length === 0) {
+      setPosts([]);
+      return;
+    }
+
+    // Busca os usuários dos posts sem depender de FK
+    const userIds = [...new Set(data.map((p: any) => p.user_id || p.userId).filter(Boolean))];
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const { data: usersData } = await supabase.from('users').select('*').in('id', userIds);
+      if (usersData) {
+        usersData.forEach((u: any) => { usersMap[u.id] = u; });
+      }
+    }
+
+    const enriched = data.map((p: any) => ({
+      ...p,
+      user: usersMap[p.user_id || p.userId] || null
+    }));
+    setPosts(enriched);
   };
 
   useEffect(() => {
