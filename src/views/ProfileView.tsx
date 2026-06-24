@@ -55,12 +55,16 @@ export default function ProfileView() {
 
   const handleDeleteProduct = async (id: string) => {
      if (confirm("Tem certeza que deseja excluir este produto?")) {
-        const { error } = await supabase.from('products').delete().eq('id', id);
-        if (!error) {
-           setMyProducts(prev => prev.filter(p => p.id !== id));
-        } else {
+        const { error, count } = await supabase.from('products').delete({ count: 'exact' }).eq('id', id);
+        if (error) {
            alert("Erro ao excluir: " + error.message);
+           return;
         }
+        if (count === 0) {
+           alert("Não foi possível excluir. Verifique se você executou o script fix_rls_products.sql no Supabase Dashboard.");
+           return;
+        }
+        setMyProducts(prev => prev.filter(p => p.id !== id));
      }
   };
 
