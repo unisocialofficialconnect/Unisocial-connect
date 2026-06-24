@@ -12,7 +12,7 @@ import { NotificationsDropdown } from "../components/NotificationsDropdown";
 export default function FeedView() {
   const [posts, setPosts] = useState<any[]>([]);
   const [newPost, setNewPost] = useState("");
-  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [postLikes, setPostLikes] = useState<Record<string, {count: number, likedByMe: boolean}>>({});
   const { user, profile } = useAuth();
   const avatarUrl = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
   const [submitting, setSubmitting] = useState(false);
@@ -20,12 +20,14 @@ export default function FeedView() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [activeCommentPost, setActiveCommentPost] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
-  const [commentImage, setCommentImage] = useState<string | null>(null);
+  const [commentImageFile, setCommentImageFile] = useState<File | null>(null);
+  const [commentImagePreview, setCommentImagePreview] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [postImage, setPostImage] = useState<string | null>(null);
   const [postImageFile, setPostImageFile] = useState<File | null>(null);
   const [sharePostId, setSharePostId] = useState<string | null>(null);
   const [postComments, setPostComments] = useState<Record<string, any[]>>({});
+  const [postCommentCounts, setPostCommentCounts] = useState<Record<string, number>>({});
   const [showLikesModal, setShowLikesModal] = useState<string | null>(null);
   const [likesUsers, setLikesUsers] = useState<any[]>([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
@@ -40,25 +42,42 @@ export default function FeedView() {
       console.error('Erro ao buscar posts:', error.message);
       return;
     }
-    if (!data || data.length === 0) {
-      setPosts([]);
-      return;
-    }
+    if (!data) { setPosts([]); return; }
 
-    // Busca os usuários dos posts sem depender de FK
+    // Busca usuários sem FK
     const userIds = [...new Set(data.map((p: any) => p.user_id || p.userId).filter(Boolean))];
     let usersMap: Record<string, any> = {};
     if (userIds.length > 0) {
       const { data: usersData } = await supabase.from('users').select('*').in('id', userIds);
-      if (usersData) {
-        usersData.forEach((u: any) => { usersMap[u.id] = u; });
-      }
+      if (usersData) usersData.forEach((u: any) => { usersMap[u.id] = u; });
     }
 
-    const enriched = data.map((p: any) => ({
-      ...p,
-      user: usersMap[p.user_id || p.userId] || null
-    }));
+    // Busca likes e comment counts
+    if (data.length > 0) {
+      const postIds = data.map((p: any) => p.id);
+      
+      const { data: likesData } = await supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds);
+      const likesMap: Record<string, {count: number, likedByMe: boolean}> = {};
+      if (likesData) {
+        likesData.forEach((l: any) => {
+          if (!likesMap[l.post_id]) likesMap[l.post_id] = { count: 0, likedByMe: false };
+          likesMap[l.post_id].count++;
+          if (user && l.user_id === user.id) likesMap[l.post_id].likedByMe = true;
+        });
+      }
+      setPostLikes(likesMap);
+
+      const { data: commentsData } = await supabase.from('comments').select('post_id').in('post_id', postIds);
+      const commentsMap: Record<string, number> = {};
+      if (commentsData) {
+        commentsData.forEach((c: any) => {
+          commentsMap[c.post_id] = (commentsMap[c.post_id] || 0) + 1;
+        });
+      }
+      setPostCommentCounts(commentsMap);
+    }
+
+    const enriched = data.map((p: any) => ({ ...p, user: usersMap[p.user_id || p.userId] || null }));
     setPosts(enriched);
   };
 
@@ -79,16 +98,21 @@ export default function FeedView() {
   const fetchComments = async (postId: string) => {
     const { data, error } = await supabase
       .from('comments')
-      .select(`
-        *,
-        user:users(*)
-      `)
-      .eq('postId', postId)
+      .select('*')
+      .eq('post_id', postId)
       .order('timestamp', { ascending: true });
       
-    if (!error && data) {
-      setPostComments(prev => ({ ...prev, [postId]: data }));
+    if (error) { console.error('Erro comentários:', error.message); return; }
+    if (!data) return;
+
+    // Busca usuários dos comentários sem FK
+    const uids = [...new Set(data.map((c: any) => c.user_id).filter(Boolean))];
+    let uMap: Record<string, any> = {};
+    if (uids.length > 0) {
+      const { data: ud } = await supabase.from('users').select('*').in('id', uids);
+      if (ud) ud.forEach((u: any) => { uMap[u.id] = u; });
     }
+    setPostComments(prev => ({ ...prev, [postId]: data.map((c: any) => ({ ...c, user: uMap[c.user_id] || null })) }));
   };
 
   useEffect(() => {
@@ -200,78 +224,78 @@ export default function FeedView() {
   };
 
   const handleLike = async (postId: string, postAuthorId: string) => {
-    if (likedPosts.has(postId) || !user) return;
-    
-    const post = posts.find(p => p.id === postId);
-    if (!post) return;
-    
-    const currentLikedBy = post.likedBy || [];
-    if (currentLikedBy.includes(user.id)) return;
-    
-    setLikedPosts(prev => new Set(prev).add(postId));
-    
+    if (!user) return;
+    const already = postLikes[postId]?.likedByMe;
+    // Atualização otimista
+    setPostLikes(prev => ({
+      ...prev,
+      [postId]: {
+        count: (prev[postId]?.count || 0) + (already ? -1 : 1),
+        likedByMe: !already
+      }
+    }));
     try {
-      const newLikedBy = [...currentLikedBy, user.id];
-      await supabase.from('posts').update({
-        likes: (post.likes || 0) + 1,
-        likedBy: newLikedBy
-      }).eq('id', postId);
-      
-      await createNotification(postAuthorId, 'like', postId);
-    } catch(e) {}
-  };
-
-  const handleViewLikes = async (post: any) => {
-    setShowLikesModal(post.id);
-    setLoadingLikes(true);
-    setLikesUsers([]);
-    if (!post.likedBy || post.likedBy.length === 0) {
-      setLoadingLikes(false);
-      return;
-    }
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .in('id', post.likedBy);
-        
-      if (!error && data) {
-         setLikesUsers(data);
+      if (already) {
+        await supabase.from('post_likes').delete().eq('post_id', postId).eq('user_id', user.id);
+      } else {
+        await supabase.from('post_likes').insert([{ post_id: postId, user_id: user.id }]);
+        await createNotification(postAuthorId, 'like', postId);
       }
     } catch(e) {
-      console.error(e);
-    } finally {
-      setLoadingLikes(false);
+      // Reverter otimismo em caso de erro
+      setPostLikes(prev => ({ ...prev, [postId]: { count: (prev[postId]?.count || 0) + (already ? 1 : -1), likedByMe: !!already } }));
     }
+  };
+
+  const handleViewLikes = async (postId: string) => {
+    setShowLikesModal(postId);
+    setLoadingLikes(true);
+    setLikesUsers([]);
+    try {
+      const { data: likesData } = await supabase.from('post_likes').select('user_id').eq('post_id', postId);
+      if (!likesData || likesData.length === 0) { setLoadingLikes(false); return; }
+      const uids = likesData.map((l: any) => l.user_id);
+      const { data } = await supabase.from('users').select('*').in('id', uids);
+      if (data) setLikesUsers(data);
+    } catch(e) { console.error(e); } finally { setLoadingLikes(false); }
   };
 
   const handleCommentSubmit = async (postId: string, postAuthorId: string | undefined) => {
-    if (!user || (!commentText.trim() && !commentImage)) return;
+    if (!user || (!commentText.trim() && !commentImageFile)) return;
     try {
+      let uploadedImageUrl: string | null = null;
+      if (commentImageFile) {
+        const ext = commentImageFile.name.split('.').pop();
+        const path = `${user.id}/comments/${Math.random()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('media').upload(path, commentImageFile);
+        if (!upErr) {
+          const { data: pubData } = supabase.storage.from('media').getPublicUrl(path);
+          uploadedImageUrl = pubData.publicUrl;
+        }
+      }
+
       const payload: any = {
-        postId,
+        post_id: postId,
         user_id: user.id,
         text: commentText,
         timestamp: new Date().toISOString()
       };
-      if (commentImage) payload.image = commentImage;
+      if (uploadedImageUrl) payload.image = uploadedImageUrl;
 
-      await supabase.from('comments').insert([payload]);
-      
-      const post = posts.find(p => p.id === postId);
-      if (post) {
-         await supabase.from('posts').update({
-            comments: (post.comments || 0) + 1
-         }).eq('id', postId);
-      }
+      const { error } = await supabase.from('comments').insert([payload]);
+      if (error) { alert('Erro ao comentar: ' + error.message); return; }
       
       await createNotification(postAuthorId, 'comment', postId);
+      await fetchComments(postId);
+      
+      // Update comment count locally
+      setPostCommentCounts(prev => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
       
       setCommentText('');
-      setCommentImage(null);
+      setCommentImageFile(null);
+      setCommentImagePreview(null);
       setShowEmojiPicker(false);
     } catch(e: any) {
-      console.error("Erro ao comentar:", e);
       alert("Erro ao enviar: " + (e.message || "Tente novamente."));
     }
   };
@@ -279,10 +303,9 @@ export default function FeedView() {
   const handleCommentImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setCommentImageFile(file);
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setCommentImage(reader.result as string);
-      };
+      reader.onloadend = () => { setCommentImagePreview(reader.result as string); };
       reader.readAsDataURL(file);
     }
   };
@@ -433,18 +456,18 @@ export default function FeedView() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-slate-400 border-t border-white/5 pt-5">
+                  <div className="flex items-center justify-between text-slate-400 border-t border-white/5 pt-5">
                   <div className="flex items-center gap-8">
                     <div className="flex items-center gap-2 group/btn">
-                      <button onClick={() => handleLike(post.id, post.userId)} className={cn("flex items-center p-2 rounded-full hover:bg-uni-purple/10 transition-colors", likedPosts.has(post.id) ? "text-uni-purple" : "text-slate-400 hover:text-uni-purple")}>
-                        <Heart size={20} className={cn("transition-transform group-active/btn:scale-125", likedPosts.has(post.id) ? "fill-uni-purple" : "")} />
+                      <button onClick={() => handleLike(post.id, post.user_id || post.userId)} className={cn("flex items-center p-2 rounded-full hover:bg-uni-purple/10 transition-colors", postLikes[post.id]?.likedByMe ? "text-uni-purple" : "text-slate-400 hover:text-uni-purple")}>
+                        <Heart size={20} className={cn("transition-transform group-active/btn:scale-125", postLikes[post.id]?.likedByMe ? "fill-uni-purple" : "")} />
                       </button>
-                      <button onClick={() => handleViewLikes(post)} className="text-sm font-bold hover:underline cursor-pointer tracking-wider">{post.likes}</button>
+                      <button onClick={() => handleViewLikes(post.id)} className="text-sm font-bold hover:underline cursor-pointer tracking-wider">{postLikes[post.id]?.count || 0}</button>
                     </div>
 
                     <button onClick={() => setActiveCommentPost(activeCommentPost === post.id ? null : post.id)} className={cn("flex items-center gap-2 p-2 rounded-full hover:bg-uni-blue/10 transition-colors group/comment", activeCommentPost === post.id ? "text-uni-blue" : "text-slate-400 hover:text-uni-blue")}>
                       <MessageCircle size={20} className="group-hover/comment:fill-uni-blue/10" />
-                      <span className="text-sm font-bold tracking-wider">{post.comments}</span>
+                      <span className="text-sm font-bold tracking-wider">{postCommentCounts[post.id] || 0}</span>
                     </button>
 
                     <button onClick={() => handleShare(post.id)} className="flex items-center gap-2 p-2 rounded-full hover:bg-uni-green/10 transition-colors hover:text-uni-green">
@@ -491,31 +514,40 @@ export default function FeedView() {
                         <div className="flex gap-4 items-center">
                             <img src={avatarUrl} alt="Me" className="w-9 h-9 rounded-full object-cover border-2 border-uni-purple/20 shrink-0" />
                             <div className="flex-1 relative flex items-center bg-white/5 border border-white/10 rounded-2xl pr-2 shadow-inner">
-                                <input 
-                                    type="text" 
-                                    value={commentText}
-                                    onChange={e => setCommentText(e.target.value)}
-                                    placeholder="Escreva um comentário..."
-                                    className="w-full bg-transparent pl-5 pr-2 py-3 text-sm text-white focus:outline-none placeholder:text-slate-600 font-medium"
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter') handleCommentSubmit(post.id, post.userId);
-                                    }}
-                                />
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-white transition-colors"><Smile size={18} /></button>
-                                    <label className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer"><ImageIcon size={18} /><input type="file" accept="image/*" className="hidden" onChange={handleCommentImageUpload} /></label>
+                            <div className="flex-1 flex flex-col gap-2">
+                                <div className="relative flex items-center bg-white/5 border border-white/10 rounded-2xl pr-2 shadow-inner w-full">
+                                    <input 
+                                        type="text" 
+                                        value={commentText}
+                                        onChange={e => setCommentText(e.target.value)}
+                                        placeholder="Escreva um comentário..."
+                                        className="w-full bg-transparent pl-5 pr-2 py-3 text-sm text-white focus:outline-none placeholder:text-slate-600 font-medium"
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') handleCommentSubmit(post.id, post.user_id || post.userId);
+                                        }}
+                                    />
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-white transition-colors"><Smile size={18} /></button>
+                                        <label className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer"><ImageIcon size={18} /><input type="file" accept="image/*" className="hidden" onChange={handleCommentImageUpload} /></label>
+                                    </div>
+                                    {showEmojiPicker && (
+                                        <div className="absolute bottom-full right-0 mb-4 bg-uni-darker border border-white/10 rounded-2xl p-3 shadow-2xl z-50 flex gap-2">
+                                            {['👍', '❤️', '😂', '🔥', '🤔', '🎉', '😢', '👏'].map(emoji => (
+                                                <button key={emoji} onClick={() => { setCommentText(prev => prev + emoji); setShowEmojiPicker(false); }} className="text-xl hover:bg-white/10 p-2 rounded-xl transition-colors">{emoji}</button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                                {showEmojiPicker && (
-                                    <div className="absolute bottom-full right-0 mb-4 bg-uni-darker border border-white/10 rounded-2xl p-3 shadow-2xl z-50 flex gap-2">
-                                        {['👍', '❤️', '😂', '🔥', '🤔', '🎉', '😢', '👏'].map(emoji => (
-                                            <button key={emoji} onClick={() => { setCommentText(prev => prev + emoji); setShowEmojiPicker(false); }} className="text-xl hover:bg-white/10 p-2 rounded-xl transition-colors">{emoji}</button>
-                                        ))}
+                                {commentImagePreview && (
+                                    <div className="relative w-max">
+                                        <img src={commentImagePreview} alt="Preview" className="h-20 rounded-xl object-cover border border-white/10" />
+                                        <button onClick={() => { setCommentImagePreview(null); setCommentImageFile(null); }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg hover:scale-110"><X size={12} /></button>
                                     </div>
                                 )}
                             </div>
                             <button 
-                                onClick={() => handleCommentSubmit(post.id, post.userId)}
-                                disabled={!commentText.trim() && !commentImage}
+                                onClick={() => handleCommentSubmit(post.id, post.user_id || post.userId)}
+                                disabled={!commentText.trim() && !commentImageFile}
                                 className="shrink-0 w-11 h-11 bg-uni-blue rounded-full flex items-center justify-center text-white shadow-lg shadow-uni-blue/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-30"
                             >
                                 <Send size={18} className="ml-1" />
