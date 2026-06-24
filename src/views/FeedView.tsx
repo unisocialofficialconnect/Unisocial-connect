@@ -147,7 +147,7 @@ export default function FeedView() {
          uploadedImageUrl = publicUrl;
       }
 
-      await supabase.from('posts').insert([{
+      const { error } = await supabase.from('posts').insert([{
         user_id: user.id,
         text: newPost,
         image: uploadedImageUrl,
@@ -156,11 +156,17 @@ export default function FeedView() {
         likedBy: [],
         timestamp: new Date().toISOString()
       }]);
+      
+      if (error) {
+         alert("Erro do banco de dados ao publicar: " + error.message);
+         return;
+      }
+      
       setNewPost("");
       setPostImage(null);
       setPostImageFile(null);
     } catch(e: any) {
-      alert("Erro ao publicar: " + e.message);
+      alert("Erro de conexão ao publicar: " + e.message);
     } finally {
       setSubmitting(false);
     }
