@@ -169,9 +169,6 @@ export default function FeedView() {
         user_id: user.id,
         text: newPost,
         image: uploadedImageUrl,
-        likes: 0,
-        comments: 0,
-        likedBy: [],
         timestamp: new Date().toISOString()
       }]);
       
