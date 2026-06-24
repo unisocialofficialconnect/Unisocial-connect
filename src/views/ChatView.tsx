@@ -33,6 +33,7 @@ export default function ChatView() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
 
   // Audio Recording States
   const [isRecording, setIsRecording] = useState(false);
@@ -449,6 +450,9 @@ export default function ChatView() {
 
             {/* Messages Container */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col pt-8 relative z-10">
+                {activeReactionMsgId && (
+                    <div className="fixed inset-0 z-40" onPointerDown={() => setActiveReactionMsgId(null)} onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(null); }} />
+                )}
                 <AnimatePresence initial={false}>
                     {messages.map((m, idx) => {
                         const isMine = m.sender_id === user?.id;
@@ -474,7 +478,7 @@ export default function ChatView() {
                                         </div>
                                     )}
 
-                                    <div className="relative group/msg">
+                                    <div className="relative group/msg" onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}>
                                         <div className={cn(
                                             "px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md relative",
                                             isMine 
@@ -496,15 +500,17 @@ export default function ChatView() {
                                                 {isMine && <CheckCheck size={12} className="text-white" />}
                                             </div>
 
-                                            {/* Reactions Popup (Desktop Hover) */}
+                                            {/* Reactions Popup (Desktop Hover & Mobile Long Press) */}
                                             <div className={cn(
-                                                "absolute -top-10 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-uni-darker border border-white/10 rounded-full px-2 py-1 flex items-center gap-1 shadow-2xl z-20 pointer-events-none group-hover/msg:pointer-events-auto",
-                                                isMine ? "right-0" : "left-0"
+                                                "absolute -top-24 transition-all bg-uni-darker/95 backdrop-blur-3xl border border-white/10 rounded-2xl p-2 flex items-center justify-start shadow-2xl z-50 flex-wrap w-[280px] max-h-32 overflow-y-auto custom-scrollbar",
+                                                activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95 md:group-hover/msg:opacity-100 md:group-hover/msg:pointer-events-auto md:group-hover/msg:scale-100",
+                                                isMine ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left"
                                             )}>
-                                                {['👍', '❤️', '🔥', '😂'].map(emoji => (
-                                                    <button key={emoji} className="text-xs hover:scale-125 transition-transform p-1">{emoji}</button>
+                                                {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
+                                                    <button key={emoji} onClick={() => { setActiveReactionMsgId(null); /* Aqui você deve ligar à função de adicionar reação do Supabase */ }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
+                                                        {emoji}
+                                                    </button>
                                                 ))}
-                                                <button className="p-1 hover:bg-white/10 rounded-full"><SmilePlus size={14} /></button>
                                             </div>
                                         </div>
 
