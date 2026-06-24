@@ -118,7 +118,7 @@ export default function FeedView() {
     if (!user || !receiverId || user.id === receiverId) return;
     try {
       await supabase.from('notifications').insert([{
-        userId: receiverId,
+        user_id: receiverId,
         senderId: user.id,
         type,
         postId,
@@ -148,7 +148,7 @@ export default function FeedView() {
       }
 
       await supabase.from('posts').insert([{
-        userId: user.id,
+        user_id: user.id,
         text: newPost,
         image: uploadedImageUrl,
         likes: 0,
@@ -229,7 +229,7 @@ export default function FeedView() {
     try {
       const payload: any = {
         postId,
-        userId: user.id,
+        user_id: user.id,
         text: commentText,
         timestamp: new Date().toISOString()
       };
