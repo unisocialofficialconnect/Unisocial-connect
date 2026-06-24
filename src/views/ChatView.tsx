@@ -28,6 +28,10 @@ export default function ChatView() {
   const [showInfoSidebar, setShowInfoSidebar] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,22 +97,80 @@ export default function ChatView() {
   }, [activeUser, user]);
 
   const handleSend = async () => {
-    if (!input.trim() || !activeUser || !user) return;
+    if ((!input.trim() && !selectedFile) || !activeUser || !user || submitting) return;
+    setSubmitting(true);
     
-    const newMsg = { 
-      sender_id: user.id,
-      receiver_id: activeUser.id, 
-      text: input,
-      created_at: new Date().toISOString()
-    };
-    
-    // Optimistic UI
-    setMessages(prev => [...prev, { ...newMsg, id: Math.random().toString() }]);
-    setInput("");
-    setReplyingTo(null);
+    try {
+        let finalImageUrl = null;
+        let fileUrl = null;
 
-    await supabase.from('messages').insert([newMsg]);
-    setTimeout(refreshUnread, 1500);
+        if (selectedFile) {
+            const fileExt = selectedFile.name.split('.').pop();
+            const fileName = `${Math.random()}.${fileExt}`;
+            const filePath = `${user.id}/${fileName}`;
+            
+            const { error: uploadError } = await supabase.storage.from('media').upload(filePath, selectedFile);
+            if (uploadError) throw uploadError;
+            
+            const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(filePath);
+            
+            if (selectedFile.type.startsWith('image/')) {
+               finalImageUrl = publicUrl;
+            } else {
+               fileUrl = publicUrl;
+            }
+        }
+
+        const finalMsgText = fileUrl 
+            ? `${input.trim()}\n\n[Arquivo Anexado]: ${fileUrl}`
+            : input.trim();
+
+        const newMsg = { 
+            sender_id: user.id,
+            receiver_id: activeUser.id, 
+            text: finalMsgText,
+            image_url: finalImageUrl,
+            created_at: new Date().toISOString()
+        };
+        
+        setInput("");
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        setShowEmojiPicker(false);
+        setReplyingTo(null);
+
+        await supabase.from('messages').insert([newMsg]);
+        setTimeout(refreshUnread, 1500);
+    } catch (e: any) {
+        alert("Erro ao enviar: " + e.message);
+    } finally {
+        setSubmitting(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => setPreviewUrl(reader.result as string);
+        reader.readAsDataURL(file);
+      } else {
+        setPreviewUrl(null);
+      }
+    }
+  };
+
+  const renderText = (text: string) => {
+      if (!text) return null;
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      return text.split(urlRegex).map((part, i) => {
+          if (part.match(urlRegex)) {
+              return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-uni-blue hover:underline font-bold break-all">{part}</a>;
+          }
+          return <span key={i}>{part}</span>;
+      });
   };
 
   const handleUserSelect = (u: User) => {
@@ -299,7 +361,10 @@ export default function ChatView() {
                                               ? "bg-gradient-to-br from-uni-purple to-uni-blue text-white rounded-tr-none" 
                                               : "bg-white/10 text-slate-200 rounded-tl-none border border-white/5"
                                         )}>
-                                            <p className="text-sm md:text-base leading-relaxed">{m.text}</p>
+                                            {m.image_url && (
+                                                <img src={m.image_url} alt="anexo" className="rounded-xl max-w-full md:max-w-xs mb-2 cursor-pointer hover:opacity-90 transition-opacity" />
+                                            )}
+                                            <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{renderText(m.text)}</p>
                                             
                                             <div className={cn(
                                                 "flex items-center gap-1.5 mt-2 transition-opacity",
@@ -378,13 +443,54 @@ export default function ChatView() {
                     "flex flex-col bg-uni-darker/60 backdrop-blur-2xl border border-white/10 transition-all",
                     replyingTo ? "rounded-b-3xl" : "rounded-3xl"
                 )}>
+                    {/* Anexo Preview */}
+                    {selectedFile && (
+                        <div className="px-4 py-3 border-b border-white/10 bg-white/5 flex items-center gap-3">
+                            {previewUrl ? (
+                                <img src={previewUrl} className="w-12 h-12 rounded-lg object-cover" />
+                            ) : (
+                                <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center">
+                                    <File size={20} className="text-uni-blue" />
+                                </div>
+                            )}
+                            <div className="flex-1 overflow-hidden">
+                                <p className="text-sm text-white font-bold truncate">{selectedFile.name}</p>
+                                <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                            <button onClick={() => {setSelectedFile(null); setPreviewUrl(null);}} className="p-2 hover:bg-white/10 rounded-full text-slate-400">
+                                <X size={16} />
+                            </button>
+                        </div>
+                    )}
+
                     {/* Toolbar */}
-                    <div className="flex items-center gap-1 border-b border-white/5 px-2 py-1.5">
-                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Anexar Arquivo"><Plus size={18} /></button>
-                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Imagens"><ImageIcon size={18} /></button>
-                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Documentos"><File size={18} /></button>
+                    <div className="flex items-center gap-1 border-b border-white/5 px-2 py-1.5 relative">
+                        <label className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer" title="Anexar Arquivo">
+                            <Plus size={18} />
+                            <input type="file" className="hidden" onChange={handleFileSelect} />
+                        </label>
+                        <label className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer" title="Imagens">
+                            <ImageIcon size={18} />
+                            <input type="file" accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
+                        </label>
+                        <label className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer" title="Documentos">
+                            <File size={18} />
+                            <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" className="hidden" onChange={handleFileSelect} />
+                        </label>
                         <div className="w-[1px] h-4 bg-white/10 mx-2"></div>
-                        <button className="p-2 text-slate-500 hover:text-white transition-colors" title="Emojis"><Smile size={18} /></button>
+                        <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-white transition-colors" title="Emojis">
+                            <Smile size={18} />
+                        </button>
+                        
+                        {showEmojiPicker && (
+                           <div className="absolute bottom-10 left-32 bg-uni-darker border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-wrap max-w-[200px] gap-2 z-50">
+                               {['😀','😂','❤️','👍','🔥','🙌','👏','🎉','🤔','😢','😎','😍','🚀','✨','👀'].map(emoji => (
+                                   <button key={emoji} onClick={() => setInput(prev => prev + emoji)} className="text-xl hover:scale-125 transition-transform p-1">
+                                       {emoji}
+                                   </button>
+                               ))}
+                           </div>
+                        )}
                     </div>
 
                     <div className="flex items-center gap-3 p-2.5">
@@ -410,10 +516,14 @@ export default function ChatView() {
                         />
                         <button 
                           onClick={handleSend}
-                          disabled={!input.trim()}
-                          className="w-11 h-11 bg-gradient-to-r from-uni-purple to-uni-blue rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 disabled:grayscale disabled:opacity-50"
+                          disabled={(!input.trim() && !selectedFile) || submitting}
+                          className="w-11 h-11 bg-gradient-to-r from-uni-purple to-uni-blue rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 disabled:grayscale disabled:opacity-50 shrink-0"
                         >
-                            <Send size={18} className="text-white ml-0.5" />
+                            {submitting ? (
+                               <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            ) : (
+                               <Send size={18} className="text-white ml-0.5" />
+                            )}
                         </button>
                     </div>
                 </div>
