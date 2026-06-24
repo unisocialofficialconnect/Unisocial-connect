@@ -513,7 +513,6 @@ export default function FeedView() {
                         
                         <div className="flex gap-4 items-center">
                             <img src={avatarUrl} alt="Me" className="w-9 h-9 rounded-full object-cover border-2 border-uni-purple/20 shrink-0" />
-                            <div className="flex-1 relative flex items-center bg-white/5 border border-white/10 rounded-2xl pr-2 shadow-inner">
                             <div className="flex-1 flex flex-col gap-2">
                                 <div className="relative flex items-center bg-white/5 border border-white/10 rounded-2xl pr-2 shadow-inner w-full">
                                     <input 
