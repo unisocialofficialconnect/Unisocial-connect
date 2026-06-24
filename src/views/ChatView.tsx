@@ -46,6 +46,7 @@ export default function ChatView() {
   const micBtnRef = useRef<HTMLButtonElement>(null);
   const isRecordingRef = useRef(false); // ref para evitar stale closure
   const isDraggingToTrashRef = useRef(false); // ref para saber se vai cancelar
+  const isPressingRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,34 +72,41 @@ export default function ChatView() {
     fetchUsers();
   }, [user]);
 
-  const fetchMessages = async () => {
-     if (!activeUser || !user) return;
-     const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${activeUser.id}),and(sender_id.eq.${activeUser.id},receiver_id.eq.${user.id})`)
-        .order('created_at', { ascending: true });
-        
-     if (!error && data) {
-        setMessages(data);
-        markAsRead(activeUser.id);
-     }
-  };
-
   useEffect(() => {
     if (activeUser && user) {
+      markAsRead(activeUser.id);
+      
+      const fetchMessages = async () => {
+          const { data, error } = await supabase
+              .from('messages')
+              .select('*')
+              .or(`and(sender_id.eq.${user.id},receiver_id.eq.${activeUser.id}),and(sender_id.eq.${activeUser.id},receiver_id.eq.${user.id})`)
+              .order('created_at', { ascending: true });
+              
+          if (!error && data) {
+              setMessages(data);
+              scrollToBottom();
+          }
+      };
+
       fetchMessages();
 
-      const channel = supabase.channel(`public:messages`)
-         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-            const newMessage = payload.new;
-            if (
-               (newMessage.sender_id === user.id && newMessage.receiver_id === activeUser.id) ||
-               (newMessage.sender_id === activeUser.id && newMessage.receiver_id === user.id)
-            ) {
-               setMessages(prev => [...prev, newMessage]);
-               markAsRead(activeUser.id);
-            }
+      const channel = supabase.channel('chat_messages')
+         .on('postgres_changes', { 
+             event: 'INSERT', 
+             schema: 'public', 
+             table: 'messages' 
+         }, (payload) => {
+             const newMsg = payload.new as Message;
+             if (
+                 (newMsg.sender_id === user.id && newMsg.receiver_id === activeUser.id) ||
+                 (newMsg.sender_id === activeUser.id && newMsg.receiver_id === user.id)
+             ) {
+                 setMessages(prev => [...prev, newMsg]);
+                 if (newMsg.sender_id === activeUser.id) {
+                     markAsRead(activeUser.id);
+                 }
+             }
          })
          .subscribe();
          
@@ -164,6 +172,12 @@ export default function ChatView() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isPressingRef.current) {
+         // Se o usuário já soltou o botão antes de aceitar permissões
+         stream.getTracks().forEach(track => track.stop());
+         return;
+      }
+
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -184,7 +198,7 @@ export default function ChatView() {
         audioChunksRef.current = [];
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(200); // Garante que gere chunks rápidos
       isRecordingRef.current = true;
       setIsRecording(true);
       setRecordingTime(0);
@@ -193,7 +207,7 @@ export default function ChatView() {
       }, 1000);
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("Não foi possível acessar o microfone. Verifique as permissões.");
+      alert("Não foi possível acessar o microfone. Verifique as permissões do navegador.");
     }
   };
 
@@ -676,6 +690,7 @@ export default function ChatView() {
                           onPointerDown={(e) => {
                               if (!input.trim() && !selectedFile) {
                                   e.preventDefault();
+                                  isPressingRef.current = true;
                                   (e.target as HTMLElement).setPointerCapture(e.pointerId);
                                   setRecordStartX(e.clientX);
                                   setDragX(0);
@@ -691,6 +706,7 @@ export default function ChatView() {
                               }
                           }}
                           onPointerUp={(e) => {
+                              isPressingRef.current = false;
                               if (isRecordingRef.current) {
                                   e.preventDefault();
                                   const shouldCancel = isDraggingToTrashRef.current || dragX < -100;
@@ -706,6 +722,7 @@ export default function ChatView() {
                               }
                           }}
                           onPointerCancel={() => {
+                              isPressingRef.current = false;
                               if (isRecordingRef.current) cancelRecording();
                               setDragX(0);
                               setIsOverTrash(false);
