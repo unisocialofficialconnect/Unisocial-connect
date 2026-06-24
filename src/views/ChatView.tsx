@@ -44,6 +44,8 @@ export default function ChatView() {
   const audioChunksRef = useRef<BlobPart[]>([]);
   const timerIntervalRef = useRef<any>(null);
   const micBtnRef = useRef<HTMLButtonElement>(null);
+  const isRecordingRef = useRef(false); // ref para evitar stale closure
+  const isDraggingToTrashRef = useRef(false); // ref para saber se vai cancelar
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -165,6 +167,7 @@ export default function ChatView() {
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+      isDraggingToTrashRef.current = false;
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -173,14 +176,16 @@ export default function ChatView() {
       };
 
       mediaRecorder.onstop = async () => {
-        if (audioChunksRef.current.length > 0) {
+        if (!isDraggingToTrashRef.current && audioChunksRef.current.length > 0) {
            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
            const file = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
            await uploadAndSendAudio(file);
         }
+        audioChunksRef.current = [];
       };
 
       mediaRecorder.start();
+      isRecordingRef.current = true;
       setIsRecording(true);
       setRecordingTime(0);
       timerIntervalRef.current = setInterval(() => {
@@ -193,24 +198,28 @@ export default function ChatView() {
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-      clearInterval(timerIntervalRef.current);
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state === 'recording') {
+      isDraggingToTrashRef.current = false;
+      mr.stop();
+      mr.stream.getTracks().forEach(track => track.stop());
     }
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    clearInterval(timerIntervalRef.current);
   };
 
   const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.onstop = null; // Prevent sending
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-      clearInterval(timerIntervalRef.current);
-      setRecordingTime(0);
-      audioChunksRef.current = [];
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state === 'recording') {
+      isDraggingToTrashRef.current = true; // Flag: do NOT send
+      mr.stop();
+      mr.stream.getTracks().forEach(track => track.stop());
     }
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    clearInterval(timerIntervalRef.current);
+    setRecordingTime(0);
   };
 
   const formatTime = (seconds: number) => {
@@ -675,16 +684,17 @@ export default function ChatView() {
                               }
                           }}
                           onPointerMove={(e) => {
-                              if (isRecording) {
+                              if (isRecordingRef.current) {
                                   const dx = e.clientX - recordStartX;
                                   setDragX(dx);
                                   setIsOverTrash(dx < -100);
                               }
                           }}
                           onPointerUp={(e) => {
-                              if (isRecording) {
+                              if (isRecordingRef.current) {
                                   e.preventDefault();
-                                  if (isOverTrash || dragX < -100) {
+                                  const shouldCancel = isDraggingToTrashRef.current || dragX < -100;
+                                  if (shouldCancel) {
                                       cancelRecording();
                                   } else {
                                       stopRecording();
@@ -696,7 +706,7 @@ export default function ChatView() {
                               }
                           }}
                           onPointerCancel={() => {
-                              if (isRecording) cancelRecording();
+                              if (isRecordingRef.current) cancelRecording();
                               setDragX(0);
                               setIsOverTrash(false);
                           }}
