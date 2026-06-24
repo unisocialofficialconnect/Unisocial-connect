@@ -1,7 +1,8 @@
-import React from "react";
-import { User, Shield, Zap, Award, Star, History, Bell, Smartphone, Key, ArrowUpRight, Grid, Bookmark, Settings, Edit3, Image as ImageIcon, Trash2 } from "lucide-react";
-import { motion } from "motion/react";
+import React, { useState, useEffect } from "react";
+import { User, Shield, Zap, Award, Star, History, Bell, Smartphone, Key, ArrowUpRight, Grid, Bookmark, Settings, Edit3, Image as ImageIcon, Trash2, ShoppingBag, X } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 import { cn } from "../utils";
 
 export default function ProfileView() {
@@ -33,16 +34,67 @@ export default function ProfileView() {
     setCoverImage("");
   };
   
+  const [activeTab, setActiveTab] = useState("Atividade");
+  const [myPosts, setMyPosts] = useState<any[]>([]);
+  const [myProducts, setMyProducts] = useState<any[]>([]);
+  const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchData = async () => {
+      const [postsRes, productsRes] = await Promise.all([
+        supabase.from('posts').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('products').select('*').eq('seller_id', user.id).order('created_at', { ascending: false })
+      ]);
+      if (postsRes.data) setMyPosts(postsRes.data);
+      if (productsRes.data) setMyProducts(productsRes.data);
+    };
+    fetchData();
+  }, [user]);
+
+  const handleDeleteProduct = async (id: string) => {
+     if (confirm("Tem certeza que deseja excluir este produto?")) {
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        if (!error) {
+           setMyProducts(prev => prev.filter(p => p.id !== id));
+        } else {
+           alert("Erro ao excluir: " + error.message);
+        }
+     }
+  };
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+     e.preventDefault();
+     setSubmitting(true);
+     try {
+        const { error } = await supabase.from('products').update({
+            title: editingProduct.title,
+            price: parseFloat(editingProduct.price),
+            description: editingProduct.description
+        }).eq('id', editingProduct.id);
+        
+        if (error) throw error;
+        
+        setMyProducts(prev => prev.map(p => p.id === editingProduct.id ? editingProduct : p));
+        setEditingProduct(null);
+     } catch(err: any) {
+        alert("Erro ao atualizar: " + err.message);
+     } finally {
+        setSubmitting(false);
+     }
+  };
+
   const stats = [
-    { label: "Posts", value: 124 },
-    { label: "Seguidores", value: "2.4k" },
-    { label: "Seguindo", value: 890 },
+    { label: "Posts", value: myPosts.length },
+    { label: "Seguidores", value: 0 },
+    { label: "Seguindo", value: 0 },
   ];
 
   const levels = {
-    current: 14,
-    xp: 2450,
-    next: 3000,
+    current: 1,
+    xp: 0,
+    next: 1000,
   };
 
   const achievements = [
@@ -204,48 +256,116 @@ export default function ProfileView() {
 
               {/* Right Column: Content Feed */}
               <div className="lg:col-span-2 space-y-6">
-                 <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                     <div className="flex gap-8">
-                        <button className="text-sm font-black text-white uppercase tracking-widest border-b-2 border-uni-blue pb-4 -mb-4 flex items-center gap-2">
-                           <Grid size={16} />
-                           Atividade
-                        </button>
-                        <button className="text-sm font-black text-slate-500 uppercase tracking-widest hover:text-white transition-all flex items-center gap-2 pb-4 -mb-4">
-                           <Bookmark size={16} />
-                           Salvos
-                        </button>
-                        <button className="text-sm font-black text-slate-500 uppercase tracking-widest hover:text-white transition-all flex items-center gap-2 pb-4 -mb-4">
-                           <History size={16} />
-                           Histórico
-                        </button>
+                 <div className="flex items-center justify-between border-b border-white/5 pb-4 overflow-x-auto custom-scrollbar">
+                     <div className="flex gap-6 md:gap-8">
+                        {["Atividade", "Salvos", "Histórico", "Market"].map(tab => (
+                           <button 
+                             key={tab} 
+                             onClick={() => setActiveTab(tab)}
+                             className={cn(
+                               "text-sm font-black uppercase tracking-widest flex items-center gap-2 pb-4 -mb-4 transition-all whitespace-nowrap",
+                               activeTab === tab ? "text-white border-b-2 border-uni-blue" : "text-slate-500 hover:text-white"
+                             )}>
+                              {tab === "Atividade" && <Grid size={16} />}
+                              {tab === "Salvos" && <Bookmark size={16} />}
+                              {tab === "Histórico" && <History size={16} />}
+                              {tab === "Market" && <ShoppingBag size={16} />}
+                              {tab}
+                           </button>
+                        ))}
                      </div>
                  </div>
 
-                 {/* Simulated User Posts */}
-                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4">
-                    {[1, 2, 3, 4, 5, 6].map((p) => (
-                       <div key={p} className="aspect-square glass-card border border-white/5 overflow-hidden group cursor-pointer">
-                          <img 
-                            src={`https://images.unsplash.com/photo-${1500000000000 + (p * 1000000)}?auto=format&fit=crop&q=80&w=400`} 
-                            alt="Post" 
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
-                          />
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                             <div className="flex items-center gap-1.5 text-white">
-                                <Star size={16} className="fill-white" />
-                                <span className="font-black text-sm">24</span>
-                             </div>
-                             <div className="flex items-center gap-1.5 text-white">
-                                <History size={16} />
-                                <span className="font-black text-sm">12</span>
-                             </div>
-                          </div>
-                       </div>
-                    ))}
-                 </div>
+                 {activeTab === "Atividade" && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4">
+                       {myPosts.length === 0 ? (
+                           <div className="col-span-full py-10 flex flex-col items-center justify-center text-slate-500">
+                               <Grid size={32} className="mb-2 opacity-50" />
+                               <p className="text-sm font-bold uppercase tracking-widest">Nenhum post publicado ainda.</p>
+                           </div>
+                       ) : (
+                           myPosts.map((p) => (
+                              <div key={p.id} className="aspect-square glass-card border border-white/5 overflow-hidden group cursor-pointer relative bg-slate-800">
+                                 {p.image_url ? (
+                                   <img src={p.image_url} alt="Post" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                                 ) : (
+                                   <div className="w-full h-full flex items-center justify-center text-white p-4 text-xs overflow-hidden text-center opacity-80 group-hover:scale-105 transition-transform">
+                                      {p.content || p.text}
+                                   </div>
+                                 )}
+                              </div>
+                           ))
+                       )}
+                    </div>
+                 )}
+
+                 {activeTab === "Market" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                       {myProducts.length === 0 ? (
+                           <div className="col-span-full py-10 flex flex-col items-center justify-center text-slate-500">
+                               <ShoppingBag size={32} className="mb-2 opacity-50" />
+                               <p className="text-sm font-bold uppercase tracking-widest">Nenhum produto à venda ainda.</p>
+                           </div>
+                       ) : (
+                           myProducts.map((p) => (
+                              <div key={p.id} className="glass-card border border-white/5 overflow-hidden flex flex-col group bg-white/5">
+                                  <div className="aspect-video relative overflow-hidden bg-slate-800">
+                                     <img src={p.image_url?.split(',')[0] || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600"} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                  </div>
+                                  <div className="p-4 flex flex-col justify-between flex-1">
+                                     <div>
+                                        <h4 className="text-white font-bold truncate text-sm">{p.title}</h4>
+                                        <p className="text-uni-blue font-black tabular-nums mt-1">R$ {p.price}</p>
+                                     </div>
+                                     <div className="flex gap-2 mt-4">
+                                        <button onClick={() => setEditingProduct(p)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1"><Edit3 size={14}/> Editar</button>
+                                        <button onClick={() => handleDeleteProduct(p.id)} className="flex-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 py-2 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1"><Trash2 size={14}/> Excluir</button>
+                                     </div>
+                                  </div>
+                              </div>
+                           ))
+                       )}
+                    </div>
+                 )}
+
+                 {(activeTab === "Salvos" || activeTab === "Histórico") && (
+                     <div className="py-10 flex flex-col items-center justify-center text-slate-500">
+                         {activeTab === "Salvos" ? <Bookmark size={32} className="mb-2 opacity-50" /> : <History size={32} className="mb-2 opacity-50" />}
+                         <p className="text-sm font-bold uppercase tracking-widest">Nenhum item {activeTab.toLowerCase()} ainda.</p>
+                     </div>
+                 )}
               </div>
           </div>
        </div>
+
+       {/* Modal Editar Produto */}
+       {editingProduct && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+             <div className="bg-uni-dark w-full max-w-md rounded-[2rem] border border-white/10 overflow-hidden shadow-2xl flex flex-col">
+                <div className="p-6 border-b border-white/10 flex items-center justify-between">
+                   <h2 className="text-xl font-bold text-white">Editar Produto</h2>
+                   <button onClick={() => setEditingProduct(null)} className="text-slate-400 hover:text-white transition-colors bg-white/5 p-2 rounded-full"><X size={20} /></button>
+                </div>
+                <form onSubmit={handleUpdateProduct} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                   <div>
+                      <label className="block text-sm font-bold text-slate-400 mb-1">Título</label>
+                      <input type="text" required value={editingProduct.title} onChange={e => setEditingProduct({...editingProduct, title: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-1 focus:ring-uni-purple" />
+                   </div>
+                   <div>
+                      <label className="block text-sm font-bold text-slate-400 mb-1">Descrição</label>
+                      <textarea required value={editingProduct.description} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} rows={4} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white resize-none outline-none focus:ring-1 focus:ring-uni-purple"></textarea>
+                   </div>
+                   <div>
+                      <label className="block text-sm font-bold text-slate-400 mb-1">Preço (R$)</label>
+                      <input type="number" required min="0" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:ring-1 focus:ring-uni-purple" />
+                   </div>
+                   <button disabled={submitting} type="submit" className="w-full bg-uni-purple py-3.5 rounded-xl font-black uppercase tracking-widest text-xs text-white mt-4 hover:scale-[1.02] transition-transform">
+                      {submitting ? "Processando..." : "Salvar Alterações"}
+                   </button>
+                </form>
+             </div>
+          </div>
+       )}
     </div>
   );
 }
