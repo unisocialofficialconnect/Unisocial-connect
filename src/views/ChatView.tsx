@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { User, Message } from "../types";
-import { Search, Phone, Video, Info, MoreVertical, Send, MessageCircle, ArrowLeft, UserPlus, Trash2, X, Plus, Image as ImageIcon, File, Smile, Check, CheckCheck, Pin, Reply, Forward, SmilePlus } from "lucide-react";
+import { Search, Phone, Video, Info, MoreVertical, Send, MessageCircle, ArrowLeft, UserPlus, Trash2, X, Plus, Image as ImageIcon, File, Smile, Check, CheckCheck, Pin, Reply, Forward, SmilePlus, Mic } from "lucide-react";
 import { cn } from "../utils";
 import { useUnread } from "../UnreadContext";
 import { motion, AnimatePresence } from "motion/react";
@@ -33,6 +33,13 @@ export default function ChatView() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Audio Recording States
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const timerIntervalRef = useRef<any>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,6 +151,91 @@ export default function ChatView() {
         setTimeout(refreshUnread, 1500);
     } catch (e: any) {
         alert("Erro ao enviar: " + e.message);
+        setSubmitting(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (audioChunksRef.current.length > 0) {
+           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+           const file = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+           await uploadAndSendAudio(file);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      alert("Não foi possível acessar o microfone. Verifique as permissões.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+      clearInterval(timerIntervalRef.current);
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.onstop = null; // Prevent sending
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+      clearInterval(timerIntervalRef.current);
+      setRecordingTime(0);
+      audioChunksRef.current = [];
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const uploadAndSendAudio = async (file: File) => {
+    if (!activeUser || !user) return;
+    setSubmitting(true);
+    try {
+        const filePath = `${user.id}/${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('media').upload(filePath, file);
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(filePath);
+        
+        const newMsg = { 
+            sender_id: user.id,
+            receiver_id: activeUser.id, 
+            text: "",
+            image_url: publicUrl,
+            created_at: new Date().toISOString()
+        };
+        await supabase.from('messages').insert([newMsg]);
+        setTimeout(refreshUnread, 1500);
+    } catch (e: any) {
+        alert("Erro ao enviar áudio: " + e.message);
     } finally {
         setSubmitting(false);
     }
@@ -362,10 +454,12 @@ export default function ChatView() {
                                               ? "bg-gradient-to-br from-uni-purple to-uni-blue text-white rounded-tr-none" 
                                               : "bg-white/10 text-slate-200 rounded-tl-none border border-white/5"
                                         )}>
-                                            {m.image_url && (
+                                            {m.image_url && m.image_url.match(/\.(webm|mp3|wav|ogg|m4a)(\?.*)?$/i) ? (
+                                                <audio src={m.image_url} controls className="mb-2 max-w-full max-h-12 rounded-xl" />
+                                            ) : m.image_url && (
                                                 <img src={m.image_url} alt="anexo" className="rounded-xl max-w-full md:max-w-xs mb-2 cursor-pointer hover:opacity-90 transition-opacity" />
                                             )}
-                                            <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{renderText(m.text)}</p>
+                                            {m.text && <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{renderText(m.text)}</p>}
                                             
                                             <div className={cn(
                                                 "flex items-center gap-1.5 mt-2 transition-opacity",
@@ -495,35 +589,71 @@ export default function ChatView() {
                     </div>
 
                     <div className="flex items-center gap-3 p-2.5">
-                        <textarea 
-                          rows={1}
-                          value={input}
-                          onChange={e => {
-                            setInput(e.target.value);
-                            // Simulate typing
-                            if (!isTyping) {
-                                setIsTyping(true);
-                                setTimeout(() => setIsTyping(false), 2000);
-                            }
-                          }}
-                          onKeyDown={e => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
+                        {isRecording ? (
+                            <div className="flex-1 bg-white/5 rounded-2xl flex items-center justify-between px-4 min-h-[44px] py-2.5 outline-none text-red-500 font-medium">
+                                <div className="flex items-center gap-2 animate-pulse">
+                                    <Mic size={18} className="text-red-500" />
+                                    <span>Gravando áudio...</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                   <span className="text-white font-mono">{formatTime(recordingTime)}</span>
+                                   <button onPointerDown={(e) => { e.stopPropagation(); cancelRecording(); }} className="text-slate-400 hover:text-white px-2 py-1 rounded-full hover:bg-white/10 transition-colors">Cancelar</button>
+                                </div>
+                            </div>
+                        ) : (
+                            <textarea 
+                              rows={1}
+                              value={input}
+                              onChange={e => {
+                                setInput(e.target.value);
+                                if (!isTyping) {
+                                    setIsTyping(true);
+                                    setTimeout(() => setIsTyping(false), 2000);
+                                }
+                              }}
+                              onKeyDown={e => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleSend();
+                                  }
+                              }}
+                              placeholder="Mensagem..."
+                              className="flex-1 bg-transparent border-none focus:ring-0 text-sm md:text-base px-4 min-h-[44px] py-2.5 max-h-32 resize-none outline-none text-white font-medium"
+                            />
+                        )}
+                        <button 
+                          onPointerDown={(e) => {
+                              if (!input.trim() && !selectedFile) {
                                   e.preventDefault();
+                                  startRecording();
+                              }
+                          }}
+                          onPointerUp={(e) => {
+                              if (isRecording) {
+                                  e.preventDefault();
+                                  stopRecording();
+                              } else if (input.trim() || selectedFile) {
                                   handleSend();
                               }
                           }}
-                          placeholder="Mensagem..."
-                          className="flex-1 bg-transparent border-none focus:ring-0 text-sm md:text-base px-4 min-h-[44px] py-2.5 max-h-32 resize-none outline-none text-white font-medium"
-                        />
-                        <button 
-                          onClick={handleSend}
-                          disabled={(!input.trim() && !selectedFile) || submitting}
-                          className="w-11 h-11 bg-gradient-to-r from-uni-purple to-uni-blue rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 disabled:grayscale disabled:opacity-50 shrink-0"
+                          onPointerCancel={() => {
+                              if (isRecording) cancelRecording();
+                          }}
+                          style={{ touchAction: 'none' }}
+                          disabled={submitting}
+                          className={cn("w-11 h-11 rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-uni-purple/20 shrink-0", 
+                            isRecording ? "bg-red-500 animate-pulse" : "bg-gradient-to-r from-uni-purple to-uni-blue",
+                            submitting && "grayscale opacity-50 pointer-events-none"
+                          )}
                         >
                             {submitting ? (
                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                             ) : (
-                               <Send size={18} className="text-white ml-0.5" />
+                               (!input.trim() && !selectedFile) ? (
+                                   <Mic size={18} className="text-white" />
+                               ) : (
+                                   <Send size={18} className="text-white ml-0.5" />
+                               )
                             )}
                         </button>
                     </div>
