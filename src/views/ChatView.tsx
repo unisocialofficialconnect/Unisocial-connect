@@ -10,7 +10,8 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function ChatView() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const avatarUrl = profile?.avatar || user?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=" + (user?.id || "u1");
   const [users, setUsers] = useState<any[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const userIdParam = searchParams.get("userId");
@@ -344,7 +345,7 @@ export default function ChatView() {
                                 )}
                             >
                                 <div className={cn("w-8 h-8 rounded-xl bg-slate-800 shrink-0 self-end mb-1 overflow-hidden transition-opacity", !showAvatar && "opacity-0")}>
-                                   <img src={isMine ? "https://i.pravatar.cc/150?u=me" : activeUser.avatar} className="w-full h-full object-cover" />
+                                   <img src={isMine ? avatarUrl : activeUser.avatar} className="w-full h-full object-cover" />
                                 </div>
                                 
                                 <div className={cn("flex flex-col space-y-1.5", isMine ? "items-end" : "items-start")}>
