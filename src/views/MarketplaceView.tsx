@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Store, Tag, ShoppingBag, Star, Heart, Search, Filter, ArrowRight, Share2, Shield, User, MapPin, Zap, X, Plus, MessageSquare } from "lucide-react";
+import { Store, Tag, ShoppingBag, Star, Heart, Search, Filter, ArrowRight, Share2, Shield, User, MapPin, Zap, X, Plus, MessageSquare, Image as ImageIcon } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../utils";
 import { supabase } from "../lib/supabase";
@@ -15,6 +15,24 @@ export default function MarketplaceView() {
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [productImages, setProductImages] = useState<File[]>([]);
+  const [locationCoords, setLocationCoords] = useState<{lat: number, lng: number} | null>(null);
+
+  useEffect(() => {
+    if (showAddProduct) {
+       if (navigator.geolocation) {
+           navigator.geolocation.getCurrentPosition((pos) => {
+               setLocationCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+           }, () => {
+               console.log("Localização negada");
+           });
+       }
+    } else {
+       setLocationCoords(null);
+       setProductImages([]);
+       setNewProduct({ title: '', price: '', category: 'Eletrônicos', description: '', imageUrl: '' });
+    }
+  }, [showAddProduct]);
 
   useEffect(() => {
     fetchProducts();
@@ -32,17 +50,30 @@ export default function MarketplaceView() {
     if (!user) return;
     setSubmitting(true);
     try {
+       let uploadedUrls: string[] = [];
+       for (const file of productImages) {
+           const fileExt = file.name.split('.').pop();
+           const fileName = `${Math.random()}.${fileExt}`;
+           const filePath = `${user.id}/products/${fileName}`;
+           const { error } = await supabase.storage.from('media').upload(filePath, file);
+           if (!error) {
+               const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+               uploadedUrls.push(data.publicUrl);
+           }
+       }
+       const finalImageUrl = uploadedUrls.length > 0 ? uploadedUrls.join(',') : newProduct.imageUrl || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600";
+       const locationString = locationCoords ? `${locationCoords.lat},${locationCoords.lng}` : "Online";
+
        await supabase.from('products').insert([{
           seller_id: user.id,
           title: newProduct.title,
           price: parseFloat(newProduct.price),
           category: newProduct.category,
           description: newProduct.description,
-          image_url: newProduct.imageUrl || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600",
-          location: "Online"
+          image_url: finalImageUrl,
+          location: locationString
        }]);
        setShowAddProduct(false);
-       setNewProduct({ title: '', price: '', category: 'Eletrônicos', description: '', imageUrl: '' });
        fetchProducts();
     } catch(err: any) {
        alert("Erro ao adicionar: " + err.message);
@@ -136,8 +167,8 @@ export default function MarketplaceView() {
                  className="group relative flex flex-col bg-white/5 border border-white/5 rounded-[2rem] overflow-hidden hover:bg-white/10 transition-all hover:shadow-2xl hover:shadow-black/50 cursor-pointer"
                >
                   <div className="relative aspect-[4/5] overflow-hidden p-4">
-                      <div className="w-full h-full rounded-[1.5rem] overflow-hidden relative">
-                         <img src={item.image_url} alt={item.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                      <div className="w-full h-full rounded-[1.5rem] overflow-hidden relative bg-slate-800">
+                         <img src={item.image_url?.split(',')[0] || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600"} alt={item.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                          <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
                       </div>
                       
@@ -174,13 +205,39 @@ export default function MarketplaceView() {
               onClick={e => e.stopPropagation()}
             >
                <button onClick={() => setSelectedProduct(null)} className="absolute top-6 right-6 p-2.5 bg-white/5 hover:bg-white/10 rounded-2xl text-white transition-colors z-30"><X size={24} /></button>
-               <div className="md:w-1/2 p-4 h-full"><img src={selectedProduct.image_url} alt={selectedProduct.title} className="w-full h-64 md:h-full object-cover rounded-[2rem]" /></div>
-               <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-between">
+               <div className="md:w-1/2 p-4 h-full custom-scrollbar overflow-y-auto">
+                  <div className="flex flex-col gap-2">
+                     {(selectedProduct.image_url?.split(',') || ["https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600"]).map((url: string, i: number) => (
+                         <img key={i} src={url} alt={selectedProduct.title} className="w-full h-64 md:h-auto object-cover rounded-[2rem] bg-slate-800" />
+                     ))}
+                  </div>
+               </div>
+               <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-between overflow-y-auto custom-scrollbar">
                   <div className="space-y-6">
                       <div>
                         <span className="bg-uni-purple/20 text-uni-purple px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">{selectedProduct.category}</span>
                         <h2 className="text-4xl font-display font-black text-white mt-4">{selectedProduct.title}</h2>
-                        <p className="text-slate-400 mt-4 leading-relaxed">{selectedProduct.description}</p>
+                        <p className="text-slate-400 mt-4 leading-relaxed">{selectedProduct.description || "Nenhuma descrição fornecida."}</p>
+                        
+                        {selectedProduct.location && selectedProduct.location.includes(',') && (() => {
+                           const [lat, lng] = selectedProduct.location.split(',').map(parseFloat);
+                           return (
+                               <div className="mt-6">
+                                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1"><MapPin size={12}/> Localização do Vendedor</h4>
+                                  <div className="w-full h-32 rounded-2xl overflow-hidden border border-white/10 opacity-70 hover:opacity-100 transition-opacity bg-slate-800">
+                                      <iframe 
+                                         width="100%" 
+                                         height="100%" 
+                                         frameBorder="0" 
+                                         scrolling="no" 
+                                         marginHeight="0" 
+                                         marginWidth="0" 
+                                         src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.01},${lng+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lng}`}>
+                                      </iframe>
+                                  </div>
+                               </div>
+                           );
+                        })()}
                       </div>
                   </div>
                   <div className="mt-10 flex flex-col gap-4">
@@ -207,19 +264,23 @@ export default function MarketplaceView() {
                   <h2 className="text-xl font-bold text-white">Vender Produto</h2>
                   <button onClick={() => setShowAddProduct(false)} className="text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
                </div>
-               <form onSubmit={handleAddProduct} className="p-6 space-y-4">
+               <form onSubmit={handleAddProduct} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                   <div>
                      <label className="block text-sm font-bold text-slate-400 mb-1">Título</label>
-                     <input type="text" required value={newProduct.title} onChange={e => setNewProduct({...newProduct, title: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white" />
+                     <input type="text" required value={newProduct.title} onChange={e => setNewProduct({...newProduct, title: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none" />
+                  </div>
+                  <div>
+                     <label className="block text-sm font-bold text-slate-400 mb-1">Descrição do Produto</label>
+                     <textarea required value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} rows={3} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none resize-none" placeholder="Detalhes do produto..."></textarea>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                      <div>
                         <label className="block text-sm font-bold text-slate-400 mb-1">Preço (R$)</label>
-                        <input type="number" required min="0" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white" />
+                        <input type="number" required min="0" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none" />
                      </div>
                      <div>
                         <label className="block text-sm font-bold text-slate-400 mb-1">Categoria</label>
-                        <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white">
+                        <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none">
                            <option value="Eletrônicos">Eletrônicos</option>
                            <option value="Informática">Informática</option>
                            <option value="Móveis">Móveis</option>
@@ -229,9 +290,44 @@ export default function MarketplaceView() {
                      </div>
                   </div>
                   <div>
-                     <label className="block text-sm font-bold text-slate-400 mb-1">URL Imagem</label>
-                     <input type="url" value={newProduct.imageUrl} onChange={e => setNewProduct({...newProduct, imageUrl: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white" />
+                     <label className="block text-sm font-bold text-slate-400 mb-2">Imagens do Produto (Até 6)</label>
+                     <div className="flex flex-wrap gap-2">
+                        {productImages.map((file, i) => (
+                           <div key={i} className="w-16 h-16 rounded-xl overflow-hidden relative group">
+                              <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                              <button type="button" onClick={() => setProductImages(prev => prev.filter((_, idx) => idx !== i))} className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><X size={16} className="text-white"/></button>
+                           </div>
+                        ))}
+                        {productImages.length < 6 && (
+                           <label className="w-16 h-16 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center text-slate-400 hover:text-uni-purple hover:border-uni-purple/50 cursor-pointer transition-colors bg-white/5">
+                               <ImageIcon size={20} />
+                               <input type="file" multiple accept="image/*" className="hidden" onChange={e => {
+                                   if (e.target.files) {
+                                      const newFiles = Array.from(e.target.files);
+                                      setProductImages(prev => [...prev, ...newFiles].slice(0, 6));
+                                   }
+                               }} />
+                           </label>
+                        )}
+                     </div>
                   </div>
+
+                  {locationCoords && (
+                     <div>
+                         <label className="block text-sm font-bold text-slate-400 mb-1">Localização Automática</label>
+                         <div className="w-full h-24 rounded-xl overflow-hidden border border-white/10 opacity-60 pointer-events-none bg-slate-800">
+                             <iframe 
+                                width="100%" 
+                                height="100%" 
+                                frameBorder="0" 
+                                scrolling="no" 
+                                marginHeight="0" 
+                                marginWidth="0" 
+                                src={`https://www.openstreetmap.org/export/embed.html?bbox=${locationCoords.lng-0.01},${locationCoords.lat-0.01},${locationCoords.lng+0.01},${locationCoords.lat+0.01}&layer=mapnik&marker=${locationCoords.lat},${locationCoords.lng}`}>
+                             </iframe>
+                         </div>
+                     </div>
+                  )}
                   <button disabled={submitting} type="submit" className="w-full bg-uni-purple py-3 rounded-xl font-bold text-white mt-4 hover:bg-uni-purple/80">
                      {submitting ? "Processando..." : "Publicar"}
                   </button>
