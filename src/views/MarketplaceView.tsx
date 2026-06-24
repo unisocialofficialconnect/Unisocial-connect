@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Store, Tag, ShoppingBag, Star, Heart, Search, Filter, ArrowRight, Share2, Shield, User, MapPin, Zap, X, Plus, MessageSquare, Image as ImageIcon } from "lucide-react";
+import { Store, Tag, ShoppingBag, Star, Heart, Search, Filter, ArrowRight, Share2, Shield, User, MapPin, Zap, X, Plus, MessageSquare, Image as ImageIcon, ThumbsUp, Bookmark } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../utils";
 import { supabase } from "../lib/supabase";
@@ -17,6 +17,17 @@ export default function MarketplaceView() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [productImages, setProductImages] = useState<File[]>([]);
   const [locationCoords, setLocationCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [sellerInfo, setSellerInfo] = useState<any>(null);
+  const [messageText, setMessageText] = useState("Oi, esse item está disponível?");
+
+  useEffect(() => {
+    if (selectedProduct) {
+       supabase.from('users').select('*').eq('id', selectedProduct.seller_id).single().then(({data}) => setSellerInfo(data));
+       setMessageText("Oi, esse item está disponível?");
+    } else {
+       setSellerInfo(null);
+    }
+  }, [selectedProduct]);
 
   useEffect(() => {
     if (showAddProduct) {
@@ -79,6 +90,22 @@ export default function MarketplaceView() {
        alert("Erro ao adicionar: " + err.message);
     } finally {
        setSubmitting(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!user || !selectedProduct) return;
+    try {
+        await supabase.from('messages').insert([{
+            sender_id: user.id,
+            receiver_id: selectedProduct.seller_id,
+            text: `${messageText}\n\n(Ref: ${selectedProduct.title})`,
+            created_at: new Date().toISOString()
+        }]);
+        alert("Mensagem enviada com sucesso! Verifique seu Chat.");
+        setMessageText("");
+    } catch(e: any) {
+        alert("Erro ao enviar: " + e.message);
     }
   };
 
@@ -204,53 +231,108 @@ export default function MarketplaceView() {
               className="w-full max-w-4xl bg-uni-dark/50 border border-white/10 rounded-[2.5rem] overflow-hidden flex flex-col md:flex-row relative shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-               <button onClick={() => setSelectedProduct(null)} className="absolute top-6 right-6 p-2.5 bg-white/5 hover:bg-white/10 rounded-2xl text-white transition-colors z-30"><X size={24} /></button>
+               <button onClick={() => setSelectedProduct(null)} className="absolute top-6 right-6 p-2.5 bg-black/40 hover:bg-black/60 rounded-full text-white transition-colors z-30"><X size={20} /></button>
                <div className="md:w-1/2 p-4 h-full custom-scrollbar overflow-y-auto">
                   <div className="flex flex-col gap-2">
                      {(selectedProduct.image_url?.split(',') || ["https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=600"]).map((url: string, i: number) => (
-                         <img key={i} src={url} alt={selectedProduct.title} className="w-full h-64 md:h-auto object-cover rounded-[2rem] bg-slate-800" />
+                         <img key={i} src={url} alt={selectedProduct.title} className="w-full h-72 md:h-auto object-cover rounded-[1.5rem] bg-slate-800" />
                      ))}
                   </div>
                </div>
-               <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-between overflow-y-auto custom-scrollbar">
-                  <div className="space-y-6">
-                      <div>
-                        <span className="bg-uni-purple/20 text-uni-purple px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">{selectedProduct.category}</span>
-                        <h2 className="text-4xl font-display font-black text-white mt-4">{selectedProduct.title}</h2>
-                        <p className="text-slate-400 mt-4 leading-relaxed">{selectedProduct.description || "Nenhuma descrição fornecida."}</p>
-                        
-                        {selectedProduct.location && selectedProduct.location.includes(',') && (() => {
-                           const [lat, lng] = selectedProduct.location.split(',').map(parseFloat);
-                           return (
-                               <div className="mt-6">
-                                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1"><MapPin size={12}/> Localização do Vendedor</h4>
-                                  <div className="w-full h-32 rounded-2xl overflow-hidden border border-white/10 opacity-70 hover:opacity-100 transition-opacity bg-slate-800">
-                                      <iframe 
-                                         width="100%" 
-                                         height="100%" 
-                                         frameBorder="0" 
-                                         scrolling="no" 
-                                         marginHeight="0" 
-                                         marginWidth="0" 
-                                         src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.01},${lng+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lng}`}>
-                                      </iframe>
-                                  </div>
-                               </div>
-                           );
-                        })()}
+               
+               <div className="md:w-1/2 p-6 md:p-8 flex flex-col gap-8 overflow-y-auto custom-scrollbar bg-uni-dark/50">
+                   {/* Cabeçalho */}
+                   <div>
+                      <h2 className="text-3xl font-display font-black text-white leading-tight">{selectedProduct.title}</h2>
+                      <p className="text-2xl font-black text-white mt-1 tabular-nums">R$ {selectedProduct.price}</p>
+                   </div>
+
+                   {/* Botões de Ação Rápidos */}
+                   <div className="flex gap-4">
+                      <button className="p-2 text-slate-400 hover:text-white transition-colors"><ThumbsUp size={22} /></button>
+                      <button className="p-2 text-slate-400 hover:text-white transition-colors"><Bookmark size={22} /></button>
+                      <button className="p-2 text-slate-400 hover:text-white transition-colors"><Share2 size={22} /></button>
+                   </div>
+
+                   {/* Enviar Mensagem */}
+                   {user?.id !== selectedProduct.seller_id && (
+                       <div className="border border-white/10 rounded-2xl p-4 bg-white/5 flex flex-col gap-3 shadow-sm">
+                          <div className="flex items-center gap-2">
+                             <MessageSquare size={16} className="text-uni-blue" />
+                             <span className="text-sm font-bold text-white">Enviar mensagem ao vendedor</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                             <input type="text" value={messageText} onChange={e => setMessageText(e.target.value)} className="flex-1 bg-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-uni-blue outline-none" />
+                             <button onClick={handleSendMessage} className="bg-uni-blue text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-uni-blue/80 transition-colors shrink-0">Enviar</button>
+                          </div>
+                       </div>
+                   )}
+
+                   {/* Descrição */}
+                   <div>
+                      <h3 className="text-xl font-bold text-white mb-2">Descrição</h3>
+                      <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedProduct.description || "Nenhuma descrição fornecida."}</p>
+                      
+                      <div className="mt-4 flex gap-8">
+                         <div>
+                             <span className="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-1">Condição</span>
+                             <span className="text-sm text-white font-medium">Usado — seminovo</span>
+                         </div>
+                         <div>
+                             <span className="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-1">Categoria</span>
+                             <span className="text-sm text-white font-medium">{selectedProduct.category}</span>
+                         </div>
                       </div>
-                  </div>
-                  <div className="mt-10 flex flex-col gap-4">
-                      <div className="flex items-center justify-between px-2">
-                         <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Total</span>
-                         <span className="text-4xl font-black text-white tabular-nums">R$ {selectedProduct.price}</span>
+                   </div>
+
+                   {/* Vendedor */}
+                   <div className="border-t border-white/5 pt-6">
+                      <div className="flex items-center justify-between mb-4">
+                         <h3 className="text-xl font-bold text-white">Vendedor</h3>
+                         <ArrowRight size={16} className="text-slate-500" />
                       </div>
-                      <div className="flex gap-3">
-                         <button className="flex-1 bg-gradient-to-r from-uni-purple to-uni-blue py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] transition-all flex items-center justify-center gap-2 text-white">
-                            <Zap size={16} className="fill-white" /> Comprar Agora
-                         </button>
+                      <div className="flex items-center gap-4">
+                         <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-800 border border-white/10">
+                            {sellerInfo?.avatar_url ? (
+                                <img src={sellerInfo.avatar_url} className="w-full h-full object-cover" />
+                            ) : (
+                                <User className="w-full h-full p-3 text-slate-500" />
+                            )}
+                         </div>
+                         <div className="flex-1">
+                             <p className="font-bold text-white text-lg">{sellerInfo?.name || "Carregando..."}</p>
+                             <p className="text-xs text-slate-400">Vendedor ativo</p>
+                         </div>
+                         <button className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">Seguir</button>
                       </div>
-                  </div>
+                   </div>
+
+                   {/* Localização */}
+                   {selectedProduct.location && selectedProduct.location.includes(',') && (() => {
+                       const [lat, lng] = selectedProduct.location.split(',').map(parseFloat);
+                       return (
+                           <div className="border-t border-white/5 pt-6 pb-4">
+                              <h3 className="text-xl font-bold text-white mb-4">Localização</h3>
+                              <div className="w-full h-40 rounded-[1.5rem] overflow-hidden border border-white/10 opacity-90 hover:opacity-100 transition-opacity bg-slate-800">
+                                  <iframe 
+                                     width="100%" 
+                                     height="100%" 
+                                     frameBorder="0" 
+                                     scrolling="no" 
+                                     marginHeight="0" 
+                                     marginWidth="0" 
+                                     src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.01},${lng+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lng}`}>
+                                  </iframe>
+                              </div>
+                              <div className="flex items-center justify-between mt-3">
+                                 <p className="text-xs text-slate-400">A localização é aproximada</p>
+                                 <button className="flex items-center gap-2 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 transition-colors">
+                                     <MapPin size={12} /> Marcar como local
+                                 </button>
+                              </div>
+                           </div>
+                       );
+                   })()}
                </div>
             </motion.div>
           </div>
