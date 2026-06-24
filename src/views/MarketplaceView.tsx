@@ -10,7 +10,7 @@ export default function MarketplaceView() {
   const [activeCategory, setActiveCategory] = useState("Todos");
   const [products, setProducts] = useState<any[]>([]);
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [newProduct, setNewProduct] = useState({ title: '', price: '', category: 'Eletrônicos', description: '', imageUrl: '' });
+  const [newProduct, setNewProduct] = useState({ title: '', price: '', category: 'Eletrônicos', condition: 'Usado — seminovo', description: '', imageUrl: '' });
   const [submitting, setSubmitting] = useState(false);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -41,7 +41,7 @@ export default function MarketplaceView() {
     } else {
        setLocationCoords(null);
        setProductImages([]);
-       setNewProduct({ title: '', price: '', category: 'Eletrônicos', description: '', imageUrl: '' });
+       setNewProduct({ title: '', price: '', category: 'Eletrônicos', condition: 'Usado — seminovo', description: '', imageUrl: '' });
     }
   }, [showAddProduct]);
 
@@ -79,7 +79,7 @@ export default function MarketplaceView() {
           seller_id: user.id,
           title: newProduct.title,
           price: parseFloat(newProduct.price),
-          category: newProduct.category,
+          category: `${newProduct.category}:::${newProduct.condition}`,
           description: newProduct.description,
           image_url: finalImageUrl,
           location: locationString
@@ -110,7 +110,8 @@ export default function MarketplaceView() {
   };
 
   const filteredItems = products.filter(item => {
-    const matchesCategory = activeCategory === "Todos" || item.category === activeCategory;
+    const itemCat = item.category?.includes(':::') ? item.category.split(':::')[0] : item.category;
+    const matchesCategory = activeCategory === "Todos" || itemCat === activeCategory;
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -276,11 +277,11 @@ export default function MarketplaceView() {
                       <div className="mt-4 flex gap-8">
                          <div>
                              <span className="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-1">Condição</span>
-                             <span className="text-sm text-white font-medium">Usado — seminovo</span>
+                             <span className="text-sm text-white font-medium">{selectedProduct.category?.includes(':::') ? selectedProduct.category.split(':::')[1] : 'Usado — seminovo'}</span>
                          </div>
                          <div>
                              <span className="text-xs text-slate-500 uppercase tracking-wider font-bold block mb-1">Categoria</span>
-                             <span className="text-sm text-white font-medium">{selectedProduct.category}</span>
+                             <span className="text-sm text-white font-medium">{selectedProduct.category?.includes(':::') ? selectedProduct.category.split(':::')[0] : selectedProduct.category}</span>
                          </div>
                       </div>
                    </div>
@@ -361,15 +362,25 @@ export default function MarketplaceView() {
                         <input type="number" required min="0" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none" />
                      </div>
                      <div>
-                        <label className="block text-sm font-bold text-slate-400 mb-1">Categoria</label>
-                        <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none">
-                           <option value="Eletrônicos">Eletrônicos</option>
-                           <option value="Informática">Informática</option>
-                           <option value="Móveis">Móveis</option>
-                           <option value="Serviços">Serviços</option>
-                           <option value="Veículos">Veículos</option>
+                        <label className="block text-sm font-bold text-slate-400 mb-1">Condição</label>
+                        <select value={newProduct.condition} onChange={e => setNewProduct({...newProduct, condition: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none">
+                           <option value="Novo">Novo</option>
+                           <option value="Usado — como novo">Usado — como novo</option>
+                           <option value="Usado — seminovo">Usado — seminovo</option>
+                           <option value="Usado — bom">Usado — bom</option>
+                           <option value="Usado — aceitável">Usado — aceitável</option>
                         </select>
                      </div>
+                  </div>
+                  <div>
+                     <label className="block text-sm font-bold text-slate-400 mb-1">Categoria</label>
+                     <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:ring-1 focus:ring-uni-purple outline-none">
+                        <option value="Eletrônicos">Eletrônicos</option>
+                        <option value="Informática">Informática</option>
+                        <option value="Móveis">Móveis</option>
+                        <option value="Serviços">Serviços</option>
+                        <option value="Veículos">Veículos</option>
+                     </select>
                   </div>
                   <div>
                      <label className="block text-sm font-bold text-slate-400 mb-2">Imagens do Produto (Até 6)</label>
