@@ -215,7 +215,6 @@ export default function ChatView() {
                     <div className="flex-1 overflow-hidden pointer-events-none">
                         <div className="flex items-center justify-between mb-0.5">
                             <span className={cn("truncate pr-2 text-sm", unreadCount > 0 || isActive ? "font-bold text-white" : "font-semibold text-slate-300")}>{u.name}</span>
-                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider tabular-nums">12:30</span>
                         </div>
                         <div className="flex items-center justify-between">
                             <p className={cn("text-xs truncate", unreadCount > 0 ? "text-slate-100 font-bold" : "text-slate-500 font-medium")}>
@@ -306,7 +305,7 @@ export default function ChatView() {
                                                 "flex items-center gap-1.5 mt-2 transition-opacity",
                                                 isMine ? "justify-end opacity-70" : "opacity-50"
                                             )}>
-                                                <span className="text-[10px] font-bold tabular-nums">12:30</span>
+                                                <span className="text-[10px] font-bold tabular-nums">{format(new Date(m.created_at), 'HH:mm')}</span>
                                                 {isMine && <CheckCheck size={12} className="text-white" />}
                                             </div>
 
