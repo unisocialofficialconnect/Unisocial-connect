@@ -47,6 +47,16 @@ export default function MarketplaceView() {
 
   useEffect(() => {
     fetchProducts();
+
+    const channel = supabase.channel('market_products')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, payload => {
+          fetchProducts();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchProducts = async () => {
