@@ -471,9 +471,6 @@ export default function ChatView() {
 
             {/* Messages Container */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col pt-8 relative z-10">
-                {activeReactionMsgId && (
-                    <div className="fixed inset-0 z-40" onPointerDown={() => setActiveReactionMsgId(null)} onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(null); }} />
-                )}
                 <AnimatePresence initial={false}>
                     {messages.map((m, idx) => {
                         const isMine = m.sender_id === user?.id;
@@ -501,14 +498,11 @@ export default function ChatView() {
                                     )}
 
                                     <div 
-                                        className={cn("relative group/msg transition-all cursor-pointer", activeReactionMsgId === m.id ? "scale-105" : "")} 
+                                        className="relative group/msg cursor-pointer" 
                                         onClick={(e) => { 
-                                            // Se clicou em um áudio ou imagem, não abre o menu (para deixar os controles nativos funcionarem)
-                                            if ((e.target as HTMLElement).tagName !== 'AUDIO' && (e.target as HTMLElement).tagName !== 'IMG') {
-                                                setActiveReactionMsgId(m.id); 
-                                            }
+                                            if ((e.target as HTMLElement).closest('audio, button, a')) return;
+                                            setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id); 
                                         }}
-                                        style={{ WebkitTapHighlightColor: 'transparent' }}
                                     >
                                         <div className={cn(
                                             "px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md relative",
@@ -532,18 +526,7 @@ export default function ChatView() {
                                             </div>
                                         </div>
 
-                                        {/* Reactions Popup (Click) - Movid to outside backdrop-blur div to fix iOS Safari clipping */}
-                                        <div className={cn(
-                                            "absolute -top-24 transition-all bg-uni-darker/95 backdrop-blur-3xl border border-white/10 rounded-2xl p-2 flex items-center justify-start shadow-2xl z-50 flex-wrap w-[280px] max-h-32 overflow-y-auto custom-scrollbar",
-                                            activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95",
-                                            isMine ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left"
-                                        )}>
-                                            {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
-                                                <button key={emoji} onClick={(e) => { e.stopPropagation(); handleAddReaction(m.id, emoji); }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
-                                                    {emoji}
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {/* Popup removido - agora usa bottom sheet modal global abaixo */
 
                                         {/* Reply/Forward Actions */}
                                         <div className={cn(
@@ -582,6 +565,65 @@ export default function ChatView() {
                 </AnimatePresence>
                 <div ref={messagesEndRef} />
             </div>
+
+            {/* ===== EMOJI REACTION BOTTOM SHEET - Funciona em todos os devices ===== */}
+            <AnimatePresence>
+                {activeReactionMsgId && (() => {
+                    const targetMsg = messages.find(m => m.id === activeReactionMsgId);
+                    const isMineTarget = targetMsg?.sender_id === user?.id;
+                    return (
+                        <motion.div
+                            key="reaction-modal-backdrop"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="fixed inset-0 z-[200] flex items-end justify-center pb-6 px-4"
+                            style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+                            onClick={() => setActiveReactionMsgId(null)}
+                        >
+                            <motion.div
+                                key="reaction-modal-panel"
+                                initial={{ y: 120, opacity: 0 }}
+                                animate={{ y: 0, opacity: 1 }}
+                                exit={{ y: 120, opacity: 0 }}
+                                transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+                                className="w-full max-w-sm bg-[#14142b] border border-white/10 rounded-3xl p-4 shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {targetMsg && (
+                                    <div className={cn(
+                                        "text-sm px-3 py-2 rounded-2xl mb-3 line-clamp-2 max-w-full",
+                                        isMineTarget
+                                            ? "bg-gradient-to-br from-uni-purple/30 to-uni-blue/20 text-purple-200 text-right"
+                                            : "bg-white/5 text-slate-300"
+                                    )}>
+                                        {targetMsg.text || '🎵 Mensagem de áudio'}
+                                    </div>
+                                )}
+                                <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-3 text-center">Reagir com</p>
+                                <div className="flex flex-wrap justify-center gap-1">
+                                    {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
+                                        <button
+                                            key={emoji}
+                                            onClick={() => handleAddReaction(activeReactionMsgId!, emoji)}
+                                            className="text-[28px] p-2 rounded-2xl hover:bg-white/10 active:scale-90 transition-all leading-none select-none"
+                                        >
+                                            {emoji}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={() => setActiveReactionMsgId(null)}
+                                    className="mt-4 w-full py-3 rounded-2xl bg-white/5 text-slate-400 text-sm font-bold hover:bg-white/10 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                            </motion.div>
+                        </motion.div>
+                    );
+                })()}
+            </AnimatePresence>
 
             {/* Input Wrapper */}
             <div className="p-5 pb-8 md:pb-6 relative z-20">
