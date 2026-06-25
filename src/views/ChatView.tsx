@@ -513,10 +513,6 @@ export default function ChatView() {
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 onTouchStart={onTouchStart}
                                 onTouchMove={onTouchMove}
-                                onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    setReplyingTo(m);
-                                }}
                                 className={cn(
                                     "flex gap-3 max-w-[85%] group relative transition-all",
                                     isMine ? "ml-auto flex-row-reverse" : "mr-auto",
@@ -570,12 +566,12 @@ export default function ChatView() {
                                             </div>
                                         </div>
 
-                                        {/* Botão de reply visível no hover (desktop) */}
+                                        {/* Botão de reply - sempre visível, discreto */}
                                         <button 
-                                            onClick={() => setReplyingTo(m)}
+                                            onClick={(e) => { e.stopPropagation(); setReplyingTo(m); }}
                                             className={cn(
-                                                "absolute top-1/2 -translate-y-1/2 p-2 bg-white/5 hover:bg-white/15 rounded-full text-slate-400 hover:text-white transition-all opacity-0 group-hover/msg:opacity-100 hidden md:flex items-center justify-center",
-                                                isMine ? "right-full mr-3" : "left-full ml-3"
+                                                "absolute top-1/2 -translate-y-1/2 p-1.5 bg-black/20 hover:bg-black/40 rounded-full text-white/60 hover:text-white transition-all opacity-0 group-hover/msg:opacity-100 flex items-center justify-center backdrop-blur-sm",
+                                                isMine ? "right-full mr-2" : "left-full ml-2"
                                             )}
                                             title="Responder"
                                         >
