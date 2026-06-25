@@ -146,12 +146,19 @@ export default function ChatView() {
             ? `${input.trim()}\n\n[Arquivo Anexado]: ${fileUrl}`
             : input.trim();
 
+        // Dados de resposta
+        const replyData = replyingTo ? {
+            reply_to_text: (replyingTo as any).text || '🎵 Áudio',
+            reply_to_sender: (replyingTo as any).sender_id === user.id ? 'Você' : activeUser.name,
+        } : {};
+
         const newMsg = { 
             sender_id: user.id,
             receiver_id: activeUser.id, 
             text: finalMsgText,
             image_url: finalImageUrl,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            ...replyData
         };
         
         setInput("");
@@ -475,37 +482,62 @@ export default function ChatView() {
                     {messages.map((m, idx) => {
                         const isMine = m.sender_id === user?.id;
                         const showAvatar = idx === 0 || messages[idx-1].sender_id !== m.sender_id;
+                        
+                        // Touch handlers para swipe-to-reply no celular
+                        let touchStartX = 0;
+                        let touchStartY = 0;
+                        let swipeActivated = false;
+
+                        const onTouchStart = (e: React.TouchEvent) => {
+                            touchStartX = e.touches[0].clientX;
+                            touchStartY = e.touches[0].clientY;
+                            swipeActivated = false;
+                        };
+
+                        const onTouchMove = (e: React.TouchEvent) => {
+                            if (swipeActivated) return;
+                            const dx = e.touches[0].clientX - touchStartX;
+                            const dy = Math.abs(e.touches[0].clientY - touchStartY);
+                            // Só ativa se for horizontal (dy pequeno) e arrastar >60px para direita
+                            if (dx > 60 && dy < 30) {
+                                swipeActivated = true;
+                                setReplyingTo(m);
+                                if (navigator.vibrate) navigator.vibrate(30);
+                            }
+                        };
+
                         return (
                             <motion.div 
                                 key={m.id}
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
+                                onTouchStart={onTouchStart}
+                                onTouchMove={onTouchMove}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setReplyingTo(m);
+                                }}
                                 className={cn(
                                     "flex gap-3 max-w-[85%] group relative transition-all",
                                     isMine ? "ml-auto flex-row-reverse" : "mr-auto",
                                     activeReactionMsgId === m.id ? "z-50" : "z-10"
                                 )}
-                                drag="x"
-                                dragConstraints={{ left: 0, right: 0 }}
-                                dragElastic={{ left: 0, right: 0.2 }}
-                                onDragEnd={(e, info) => {
-                                    if (info.offset.x > 50) {
-                                        setReplyingTo(m);
-                                    }
-                                }}
-                                onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    setReplyingTo(m);
-                                }}
                             >
                                 <div className={cn("w-8 h-8 rounded-xl bg-slate-800 shrink-0 self-end mb-1 overflow-hidden transition-opacity", !showAvatar && "opacity-0")}>
                                    <img src={isMine ? avatarUrl : activeUser.avatar} className="w-full h-full object-cover" />
                                 </div>
                                 
                                 <div className={cn("flex flex-col space-y-1.5", isMine ? "items-end" : "items-start")}>
-                                    {m.replyTo && (
-                                        <div className="bg-white/5 px-4 py-2 rounded-2xl border-l-4 border-uni-purple text-xs text-slate-400 mb-1 max-w-full truncate blur-[0.2px]">
-                                            Replying to...
+                                    {/* Mensagem citada (reply preview no balão) */}
+                                    {m.reply_to_text && (
+                                        <div className={cn(
+                                            "flex items-start gap-2 px-3 py-2 rounded-xl border-l-4 border-uni-purple bg-white/5 text-xs w-full mb-0.5"
+                                        )}>
+                                            <Reply size={11} className="text-uni-purple mt-0.5 shrink-0" />
+                                            <div className="overflow-hidden">
+                                                <p className="text-uni-purple font-black text-[10px] uppercase tracking-wider mb-0.5">{m.reply_to_sender}</p>
+                                                <p className="text-slate-400 line-clamp-1 text-[11px]">{m.reply_to_text}</p>
+                                            </div>
                                         </div>
                                     )}
 
@@ -538,21 +570,22 @@ export default function ChatView() {
                                             </div>
                                         </div>
 
-                                        {/* Popup removido - agora usa bottom sheet modal global abaixo */
-
-                                        {/* Reply/Forward Actions */}
-                                        <div className={cn(
-                                            "absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition-all",
-                                            isMine ? "right-full mr-3" : "left-full ml-3"
-                                        )}>
-                                            <button onClick={() => setReplyingTo(m)} className="p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors" title="Responder"><Reply size={14} /></button>
-                                            <button className="p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors" title="Encaminhar"><Forward size={14} /></button>
-                                        </div>
+                                        {/* Botão de reply visível no hover (desktop) */}
+                                        <button 
+                                            onClick={() => setReplyingTo(m)}
+                                            className={cn(
+                                                "absolute top-1/2 -translate-y-1/2 p-2 bg-white/5 hover:bg-white/15 rounded-full text-slate-400 hover:text-white transition-all opacity-0 group-hover/msg:opacity-100 hidden md:flex items-center justify-center",
+                                                isMine ? "right-full mr-3" : "left-full ml-3"
+                                            )}
+                                            title="Responder"
+                                        >
+                                            <Reply size={14} />
+                                        </button>
                                     </div>
                                     
                                     {m.reactions && m.reactions.length > 0 && (
-                                        <div className="flex gap-1 mt-1">
-                                            {m.reactions.map((r, i) => (
+                                        <div className="flex gap-1 mt-1 flex-wrap">
+                                            {m.reactions.map((r: any, i: number) => (
                                                 <span key={i} className="bg-white/10 border border-white/5 rounded-full px-1.5 py-0.5 text-[10px] filter drop-shadow-md">{r.emoji} {r.count}</span>
                                             ))}
                                         </div>
@@ -640,15 +673,17 @@ export default function ChatView() {
             {/* Input Wrapper */}
             <div className="p-5 pb-8 md:pb-6 relative z-20">
                 {replyingTo && (
-                    <div className="absolute bottom-full left-5 right-5 mb-0 bg-uni-dark/95 backdrop-blur-xl border border-white/10 rounded-t-2xl p-3 flex items-center justify-between border-b-uni-purple/50">
+                    <div className="absolute bottom-full left-5 right-5 mb-0 bg-uni-dark/95 backdrop-blur-xl border border-white/10 border-b-0 rounded-t-2xl p-3 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <Reply size={16} className="text-uni-purple ml-2" />
-                            <div className="border-l-2 border-uni-purple pl-3">
-                                <p className="text-[10px] font-black text-uni-purple uppercase tracking-widest">{activeUser.name}</p>
-                                <p className="text-xs text-slate-400 line-clamp-1">{replyingTo.text}</p>
+                            <Reply size={16} className="text-uni-purple ml-2 shrink-0" />
+                            <div className="border-l-2 border-uni-purple pl-3 overflow-hidden">
+                                <p className="text-[10px] font-black text-uni-purple uppercase tracking-widest">
+                                    {(replyingTo as any).sender_id === user?.id ? 'Você' : activeUser.name}
+                                </p>
+                                <p className="text-xs text-slate-400 truncate">{(replyingTo as any).text || '🎵 Áudio'}</p>
                             </div>
                         </div>
-                        <button onClick={() => setReplyingTo(null)} className="p-1.5 hover:bg-white/10 rounded-full text-slate-500 transition-colors"><X size={16} /></button>
+                        <button onClick={() => setReplyingTo(null)} className="p-1.5 hover:bg-white/10 rounded-full text-slate-500 transition-colors shrink-0"><X size={16} /></button>
                     </div>
                 )}
 
