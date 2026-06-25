@@ -485,6 +485,18 @@ export default function ChatView() {
                                     isMine ? "ml-auto flex-row-reverse" : "mr-auto",
                                     activeReactionMsgId === m.id ? "z-50" : "z-10"
                                 )}
+                                drag="x"
+                                dragConstraints={{ left: 0, right: 0 }}
+                                dragElastic={{ left: 0, right: 0.2 }}
+                                onDragEnd={(e, info) => {
+                                    if (info.offset.x > 50) {
+                                        setReplyingTo(m);
+                                    }
+                                }}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setReplyingTo(m);
+                                }}
                             >
                                 <div className={cn("w-8 h-8 rounded-xl bg-slate-800 shrink-0 self-end mb-1 overflow-hidden transition-opacity", !showAvatar && "opacity-0")}>
                                    <img src={isMine ? avatarUrl : activeUser.avatar} className="w-full h-full object-cover" />
