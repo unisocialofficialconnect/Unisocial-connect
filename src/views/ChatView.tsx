@@ -50,9 +50,6 @@ export default function ChatView() {
   const isPressingRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isLongPressTriggeredRef = useRef(false);
-  const touchStartRef = useRef<{x: number, y: number} | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -168,6 +165,29 @@ export default function ChatView() {
     } catch (e: any) {
         alert("Erro ao enviar: " + e.message);
         setSubmitting(false);
+    }
+  };
+
+  const handleAddReaction = async (msgId: string, emoji: string) => {
+    setActiveReactionMsgId(null);
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    let updatedReactions = msg.reactions ? [...msg.reactions] : [];
+    const existingIdx = updatedReactions.findIndex((r: any) => r.emoji === emoji);
+    if (existingIdx >= 0) {
+        updatedReactions[existingIdx].count += 1;
+    } else {
+        updatedReactions.push({ emoji, count: 1 });
+    }
+
+    // Update UI immediately (Optimistic UI)
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions: updatedReactions } : m));
+
+    // Update database
+    const { error } = await supabase.from('messages').update({ reactions: updatedReactions }).eq('id', msgId);
+    if (error) {
+       console.error("Erro ao salvar reação", error);
     }
   };
 
@@ -481,44 +501,14 @@ export default function ChatView() {
                                     )}
 
                                     <div 
-                                        className={cn("relative group/msg transition-all", activeReactionMsgId === m.id ? "scale-105" : "")} 
-                                        onContextMenu={(e) => { e.preventDefault(); setActiveReactionMsgId(m.id); }}
-                                        onTouchStart={(e) => {
-                                            isLongPressTriggeredRef.current = false;
-                                            const touch = e.touches[0];
-                                            touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-                                            pressTimerRef.current = setTimeout(() => {
-                                                isLongPressTriggeredRef.current = true;
-                                                setActiveReactionMsgId(m.id);
-                                                if (navigator.vibrate) navigator.vibrate(50);
-                                            }, 500);
-                                        }}
-                                        onTouchMove={(e) => {
-                                            if (!touchStartRef.current) return;
-                                            const touch = e.touches[0];
-                                            const dx = Math.abs(touch.clientX - touchStartRef.current.x);
-                                            const dy = Math.abs(touch.clientY - touchStartRef.current.y);
-                                            if (dx > 10 || dy > 10) {
-                                                if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-                                                touchStartRef.current = null;
+                                        className={cn("relative group/msg transition-all cursor-pointer", activeReactionMsgId === m.id ? "scale-105" : "")} 
+                                        onClick={(e) => { 
+                                            // Se clicou em um áudio ou imagem, não abre o menu (para deixar os controles nativos funcionarem)
+                                            if ((e.target as HTMLElement).tagName !== 'AUDIO' && (e.target as HTMLElement).tagName !== 'IMG') {
+                                                setActiveReactionMsgId(m.id); 
                                             }
                                         }}
-                                        onTouchEnd={() => {
-                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-                                        }}
-                                        onMouseDown={() => {
-                                            // Desktop fallback
-                                            pressTimerRef.current = setTimeout(() => {
-                                                setActiveReactionMsgId(m.id);
-                                            }, 500);
-                                        }}
-                                        onMouseUp={() => {
-                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-                                        }}
-                                        onMouseLeave={() => {
-                                            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-                                        }}
-                                        style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}
+                                        style={{ WebkitTapHighlightColor: 'transparent' }}
                                     >
                                         <div className={cn(
                                             "px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md relative",
@@ -542,14 +532,14 @@ export default function ChatView() {
                                             </div>
                                         </div>
 
-                                        {/* Reactions Popup (Desktop Hover & Mobile Long Press) - Movid to outside backdrop-blur div to fix iOS Safari clipping */}
+                                        {/* Reactions Popup (Click) - Movid to outside backdrop-blur div to fix iOS Safari clipping */}
                                         <div className={cn(
                                             "absolute -top-24 transition-all bg-uni-darker/95 backdrop-blur-3xl border border-white/10 rounded-2xl p-2 flex items-center justify-start shadow-2xl z-50 flex-wrap w-[280px] max-h-32 overflow-y-auto custom-scrollbar",
-                                            activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95 md:group-hover/msg:opacity-100 md:group-hover/msg:pointer-events-auto md:group-hover/msg:scale-100",
+                                            activeReactionMsgId === m.id ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95",
                                             isMine ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left"
                                         )}>
                                             {['💜','🔥','😉','😆','😁','😂','🤣','😮','🥱','🥰','😍','🤩','😢','😡','🎉','😳','😵','😫','😩','🫩','🥶','🤢','🤮','😴','😪','🤡','👍🏻','➕'].map(emoji => (
-                                                <button key={emoji} onClick={() => { setActiveReactionMsgId(null); /* Aqui você deve ligar à função de adicionar reação do Supabase */ }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
+                                                <button key={emoji} onClick={(e) => { e.stopPropagation(); handleAddReaction(m.id, emoji); }} className="text-[22px] hover:scale-125 transition-transform p-1.5 hover:bg-white/10 rounded-xl leading-none">
                                                     {emoji}
                                                 </button>
                                             ))}
