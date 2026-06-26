@@ -48,9 +48,6 @@ export default function ChatView() {
   const isRecordingRef = useRef(false); // ref para evitar stale closure
   const isDraggingToTrashRef = useRef(false); // ref para saber se vai cancelar
   const isPressingRef = useRef(false);
-  
-  // Swipe to reply state
-  const swipeStateRef = useRef({ startX: 0, startY: 0, activated: false, msgId: null as string | null });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -485,38 +482,11 @@ export default function ChatView() {
                     {messages.map((m, idx) => {
                         const isMine = m.sender_id === user?.id;
                         const showAvatar = idx === 0 || messages[idx-1].sender_id !== m.sender_id;
-                        
-                        const onTouchStart = (e: React.TouchEvent) => {
-                            swipeStateRef.current = {
-                                startX: e.touches[0].clientX,
-                                startY: e.touches[0].clientY,
-                                activated: false,
-                                msgId: m.id
-                            };
-                        };
-
-                        const onTouchMove = (e: React.TouchEvent) => {
-                            const state = swipeStateRef.current;
-                            if (state.activated || state.msgId !== m.id) return;
-                            
-                            const dx = e.touches[0].clientX - state.startX;
-                            const dy = Math.abs(e.touches[0].clientY - state.startY);
-                            
-                            // Ativa se for horizontal (arrastar >45px para direita)
-                            if (dx > 45 && dy < 30) {
-                                state.activated = true;
-                                setReplyingTo(m);
-                                if (navigator.vibrate) navigator.vibrate(30);
-                            }
-                        };
-
                         return (
                             <motion.div 
                                 key={m.id}
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                                onTouchStart={onTouchStart}
-                                onTouchMove={onTouchMove}
                                 className={cn(
                                     "flex gap-3 max-w-[85%] group relative transition-all",
                                     isMine ? "ml-auto flex-row-reverse" : "mr-auto",
@@ -658,12 +628,35 @@ export default function ChatView() {
                                         </button>
                                     ))}
                                 </div>
-                                <button
-                                    onClick={() => setActiveReactionMsgId(null)}
-                                    className="mt-4 w-full py-3 rounded-2xl bg-white/5 text-slate-400 text-sm font-bold hover:bg-white/10 transition-colors"
-                                >
-                                    Cancelar
-                                </button>
+                                <div className="flex flex-col gap-2 mt-4">
+                                    <button
+                                        onClick={() => {
+                                            setReplyingTo(targetMsg!);
+                                            setActiveReactionMsgId(null);
+                                        }}
+                                        className="w-full py-3.5 rounded-2xl bg-uni-purple/20 text-uni-purple text-sm font-bold flex items-center justify-center gap-2 hover:bg-uni-purple/30 transition-colors"
+                                    >
+                                        <Reply size={16} /> Responder
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => {
+                                            // Placeholder for Forward action
+                                            alert('Em breve: Encaminhar para outro contato!');
+                                            setActiveReactionMsgId(null);
+                                        }}
+                                        className="w-full py-3.5 rounded-2xl bg-white/5 text-slate-300 text-sm font-bold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+                                    >
+                                        <Forward size={16} /> Encaminhar
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => setActiveReactionMsgId(null)}
+                                        className="w-full py-3.5 rounded-2xl bg-transparent border border-white/10 text-slate-500 text-sm font-bold hover:bg-white/5 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
                             </motion.div>
                         </motion.div>
                     );
