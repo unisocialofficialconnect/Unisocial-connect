@@ -48,6 +48,9 @@ export default function ChatView() {
   const isRecordingRef = useRef(false); // ref para evitar stale closure
   const isDraggingToTrashRef = useRef(false); // ref para saber se vai cancelar
   const isPressingRef = useRef(false);
+  
+  // Swipe to reply state
+  const swipeStateRef = useRef({ startX: 0, startY: 0, activated: false, msgId: null as string | null });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -483,24 +486,25 @@ export default function ChatView() {
                         const isMine = m.sender_id === user?.id;
                         const showAvatar = idx === 0 || messages[idx-1].sender_id !== m.sender_id;
                         
-                        // Touch handlers para swipe-to-reply no celular
-                        let touchStartX = 0;
-                        let touchStartY = 0;
-                        let swipeActivated = false;
-
                         const onTouchStart = (e: React.TouchEvent) => {
-                            touchStartX = e.touches[0].clientX;
-                            touchStartY = e.touches[0].clientY;
-                            swipeActivated = false;
+                            swipeStateRef.current = {
+                                startX: e.touches[0].clientX,
+                                startY: e.touches[0].clientY,
+                                activated: false,
+                                msgId: m.id
+                            };
                         };
 
                         const onTouchMove = (e: React.TouchEvent) => {
-                            if (swipeActivated) return;
-                            const dx = e.touches[0].clientX - touchStartX;
-                            const dy = Math.abs(e.touches[0].clientY - touchStartY);
-                            // Só ativa se for horizontal (dy pequeno) e arrastar >60px para direita
-                            if (dx > 60 && dy < 30) {
-                                swipeActivated = true;
+                            const state = swipeStateRef.current;
+                            if (state.activated || state.msgId !== m.id) return;
+                            
+                            const dx = e.touches[0].clientX - state.startX;
+                            const dy = Math.abs(e.touches[0].clientY - state.startY);
+                            
+                            // Ativa se for horizontal (arrastar >45px para direita)
+                            if (dx > 45 && dy < 30) {
+                                state.activated = true;
                                 setReplyingTo(m);
                                 if (navigator.vibrate) navigator.vibrate(30);
                             }
